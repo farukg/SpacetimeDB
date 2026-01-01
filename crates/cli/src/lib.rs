@@ -1,4 +1,6 @@
 pub mod api;
+#[doc(hidden)]
+pub mod build_support;
 mod common_args;
 mod config;
 pub(crate) mod detect;

@@ -28,78 +28,14 @@ pub struct Rust;
 
 impl Lang for Rust {
     fn generate_type_files(&self, module: &ModuleDef, typ: &TypeDef) -> Vec<OutputFile> {
-        let type_name = collect_case(Case::Pascal, typ.accessor_name.name_segments());
-
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
-
-        print_file_header(out, false);
-        out.newline();
-
-        match &module.typespace_for_generate()[typ.ty] {
-            AlgebraicTypeDef::Product(product) => {
-                gen_and_print_imports(module, out, &product.elements, &[typ.ty]);
-                out.newline();
-                define_struct_for_product(module, out, &type_name, &product.elements, "pub");
-            }
-            AlgebraicTypeDef::Sum(sum) => {
-                gen_and_print_imports(module, out, &sum.variants, &[typ.ty]);
-                out.newline();
-                define_enum_for_sum(module, out, &type_name, &sum.variants, false);
-            }
-            AlgebraicTypeDef::PlainEnum(plain_enum) => {
-                let variants = plain_enum
-                    .variants
-                    .iter()
-                    .cloned()
-                    .map(|var| (var, AlgebraicTypeUse::Unit))
-                    .collect::<Vec<_>>();
-                define_enum_for_sum(module, out, &type_name, &variants, true);
-            }
-        }
-        out.newline();
-
-        writeln!(
-            out,
-            "
-impl __sdk::InModule for {type_name} {{
-    type Module = super::RemoteModule;
-}}
-",
-        );
-
-        // Do not implement query col types for nested types.
-        // as querying is only supported on top-level table row types.
-        let name = type_ref_name(module, typ.ty);
-        let implemented = match module
-            .tables()
-            .find(|t| type_ref_name(module, t.product_type_ref) == name)
-        {
-            Some(table) => {
-                implement_query_col_types_for_table_struct(module, out, table)
-                    .expect("failed to implement query col types");
-                out.newline();
-                true
-            }
-            _ => false,
-        };
-
-        if !implemented
-            && let Some(type_ref) = module
-                .views()
-                .map(|v| v.product_type_ref)
-                .find(|type_ref| type_ref_name(module, *type_ref) == name)
-        {
-            implement_query_col_types_for_struct(module, out, type_ref).expect("failed to implement query col types");
-            out.newline();
-        }
-
-        vec![OutputFile {
-            filename: type_module_name(&typ.accessor_name) + ".rs",
-            code: output.into_inner(),
-        }]
+        generate_type_files(module, typ)
     }
-    fn generate_table_file_from_schema(&self, module: &ModuleDef, table: &TableDef, schema: TableSchema) -> OutputFile {
+    fn generate_table_file_from_schema(
+        &self,
+        module: &ModuleDef,
+        table: &TableDef,
+        schema: TableSchema,
+    ) -> Result<OutputFile, crate::CodegenError> {
         let type_ref = table.product_type_ref;
 
         let mut output = CodeIndenter::new(String::new(), INDENT);
@@ -114,15 +50,12 @@ impl __sdk::InModule for {type_name} {{
 
         let product_def = module.typespace_for_generate()[type_ref].as_product().unwrap();
 
-        // Import the types of all fields.
-        // We only need to import fields which have indices or unique constraints,
-        // but it's easier to just import all of 'em, since we have `#![allow(unused)]` anyway.
-        gen_and_print_imports(
-            module,
-            out,
-            &product_def.elements,
-            &[], // No need to skip any imports; we're not defining a type, so there's no chance of circular imports.
-        );
+        let mut imports = Imports::new();
+        for (_, ty) in iter_unique_cols(module.typespace_for_generate(), &schema, product_def) {
+            add_one_import(&mut imports, ty);
+        }
+        remove_skipped_imports(&mut imports, &[type_ref]);
+        print_imports(module, out, imports);
 
         let table_name = table.name.deref();
         let table_name_pascalcase = table.accessor_name.deref().to_case(Case::Pascal);
@@ -352,7 +285,7 @@ pub(super) fn register_table(client_cache: &mut __sdk::ClientCache<super::Remote
             "
 #[doc(hidden)]
 pub(super) fn parse_table_update(
-    raw_updates: __ws::v2::TableUpdate,
+    raw_updates: __sdk::__ws::v2::TableUpdate,
 ) -> __sdk::Result<__sdk::TableUpdate<{row_type}>> {{
     __sdk::TableUpdate::parse_table_update(raw_updates).map_err(|e| {{
         __sdk::InternalError::failed_parse(
@@ -366,101 +299,119 @@ pub(super) fn parse_table_update(
 
         implement_query_table_accessor(table, out, &row_type).expect("failed to implement query table accessor");
 
-        OutputFile {
+        Ok(OutputFile {
             filename: table_module_name(&table.accessor_name) + ".rs",
             code: output.into_inner(),
-        }
+        })
     }
-    fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
+    fn generate_reducer_file(
+        &self,
+        module: &ModuleDef,
+        reducer: &ReducerDef,
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = CodeIndenter::new(String::new(), INDENT);
+            let out = &mut output;
 
-        print_file_header(out, false);
+            print_file_header(out, false);
 
-        out.newline();
+            out.newline();
 
-        gen_and_print_imports(
-            module,
-            out,
-            &reducer.params_for_generate.elements,
-            // No need to skip any imports; we're not emitting a type that other modules can import.
-            &[],
-        );
+            gen_and_print_imports(
+                module,
+                out,
+                &reducer.params_for_generate.elements,
+                // No need to skip any imports; we're not emitting a type that other modules can import.
+                &[],
+            );
 
-        out.newline();
+            out.newline();
 
-        let reducer_name = reducer.name.deref();
-        let func_name = reducer_function_name(reducer);
-        let args_type = function_args_type_name(&reducer.accessor_name);
-        let enum_variant_name = reducer_variant_name(&reducer.accessor_name);
+            let reducer_name = reducer.name.deref();
+            let func_name = reducer_function_name(reducer);
+            let args_type = function_args_type_name(&reducer.accessor_name);
+            let enum_variant_name = reducer_variant_name(&reducer.accessor_name);
+            let args_binding = if reducer.params_for_generate.elements.is_empty() {
+                "_args"
+            } else {
+                "args"
+            };
 
-        // Define an "args struct" for the reducer.
-        // This is not user-facing (note the `pub(super)` visibility);
-        // it is an internal helper for serialization and deserialization.
-        // We actually want to ser/de instances of `enum Reducer`, but:
-        // - `Reducer` will have struct-like variants, which SATS ser/de does not support.
-        // - The WS format does not contain a BSATN-serialized `Reducer` instance;
-        //   it holds the reducer name or ID separately from the argument bytes.
-        //   We could work up some magic with `DeserializeSeed`
-        //   and/or custom `Serializer` and `Deserializer` types
-        //   to account for this, but it's much easier to just use an intermediate struct per reducer.
-        define_struct_for_product(
-            module,
-            out,
-            &args_type,
-            &reducer.params_for_generate.elements,
-            "pub(super)",
-        );
+            // Define an "args struct" for the reducer.
+            // This is not user-facing (note the `pub(super)` visibility);
+            // it is an internal helper for serialization and deserialization.
+            // We actually want to ser/de instances of `enum Reducer`, but:
+            // - `Reducer` will have struct-like variants, which SATS ser/de does not support.
+            // - The WS format does not contain a BSATN-serialized `Reducer` instance;
+            //   it holds the reducer name or ID separately from the argument bytes.
+            //   We could work up some magic with `DeserializeSeed`
+            //   and/or custom `Serializer` and `Deserializer` types
+            //   to account for this, but it's much easier to just use an intermediate struct per reducer.
+            define_struct_for_product(
+                module,
+                out,
+                &args_type,
+                &reducer.params_for_generate.elements,
+                "pub(super)",
+                false,
+            );
 
-        out.newline();
+            out.newline();
 
-        let FormattedArglist {
-            arglist_no_delimiters,
-            arg_names,
-        } = FormattedArglist::for_arguments(module, &reducer.params_for_generate.elements);
+            let FormattedArglist {
+                arglist_no_delimiters,
+                arg_names,
+            } = FormattedArglist::for_arguments(module, &reducer.params_for_generate.elements);
 
-        write!(out, "impl From<{args_type}> for super::Reducer ");
-        out.delimited_block(
-            "{",
-            |out| {
-                write!(out, "fn from(args: {args_type}) -> Self ");
-                out.delimited_block(
-                    "{",
-                    |out| {
-                        write!(out, "Self::{enum_variant_name}");
-                        if !reducer.params_for_generate.elements.is_empty() {
-                            // We generate "struct variants" for reducers with arguments,
-                            // but "unit variants" for reducers of no arguments.
-                            // These use different constructor syntax.
-                            out.delimited_block(
-                                " {",
-                                |out| {
-                                    for (arg_ident, _ty) in &reducer.params_for_generate.elements[..] {
-                                        let arg_name = arg_ident.deref().to_case(Case::Snake);
-                                        writeln!(out, "{arg_name}: args.{arg_name},");
-                                    }
-                                },
-                                "}",
-                            );
-                        }
-                        out.newline();
-                    },
-                    "}\n",
-                );
-            },
-            "}\n",
-        );
+            write!(out, "impl From<{args_type}> for super::Reducer ");
+            out.delimited_block(
+                "{",
+                |out| {
+                    write!(out, "fn from({args_binding}: {args_type}) -> Self ");
+                    out.delimited_block(
+                        "{",
+                        |out| {
+                            write!(out, "Self::{enum_variant_name}");
+                            if !reducer.params_for_generate.elements.is_empty() {
+                                // We generate "struct variants" for reducers with arguments,
+                                // but "unit variants" for reducers of no arguments.
+                                // These use different constructor syntax.
+                                out.delimited_block(
+                                    " {",
+                                    |out| {
+                                        for (arg_ident, _ty) in &reducer.params_for_generate.elements[..] {
+                                            let arg_name = arg_ident.deref().to_case(Case::Snake);
+                                            writeln!(out, "{arg_name}: args.{arg_name},");
+                                        }
+                                    },
+                                    "}",
+                                );
+                            }
+                            out.newline();
+                        },
+                        "}\n",
+                    );
+                },
+                "}\n",
+            );
 
-        // TODO: check for lifecycle reducers and do not generate the invoke method.
+            // TODO: check for lifecycle reducers and do not generate the invoke method.
 
-        writeln!(
-            out,
-            "
+            let clippy_too_many_arguments =
+                if reducer.params_for_generate.elements.len() + 2 > CLIPPY_TOO_MANY_ARGUMENTS_LIMIT {
+                    "#[allow(clippy::too_many_arguments)]\n"
+                } else {
+                    ""
+                };
+
+            writeln!(
+                out,
+                "
 impl __sdk::InModule for {args_type} {{
     type Module = super::RemoteModule;
 }}
 
-#[allow(non_camel_case_types)]
+{clippy_too_many_arguments}#[allow(non_camel_case_types)]
 /// Extension trait for access to the reducer `{reducer_name}`.
 ///
 /// Implemented for [`super::RemoteReducers`].
@@ -502,64 +453,78 @@ impl {func_name} for super::RemoteReducers {{
     }}
 }}
 "
-        );
+            );
 
-        OutputFile {
-            filename: reducer_module_name(&reducer.accessor_name) + ".rs",
-            code: output.into_inner(),
-        }
+            OutputFile {
+                filename: reducer_module_name(&reducer.accessor_name) + ".rs",
+                code: output.into_inner(),
+            }
+        })
     }
 
-    fn generate_procedure_file(&self, module: &ModuleDef, procedure: &ProcedureDef) -> OutputFile {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
+    fn generate_procedure_file(
+        &self,
+        module: &ModuleDef,
+        procedure: &ProcedureDef,
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = CodeIndenter::new(String::new(), INDENT);
+            let out = &mut output;
 
-        print_file_header(out, false);
+            print_file_header(out, false);
 
-        out.newline();
+            out.newline();
 
-        let mut imports = Imports::new();
-        gen_imports(&mut imports, &procedure.params_for_generate.elements);
-        add_one_import(&mut imports, &procedure.return_type_for_generate);
-        print_imports(module, out, imports);
+            let mut imports = Imports::new();
+            gen_imports(&mut imports, &procedure.params_for_generate.elements);
+            add_one_import(&mut imports, &procedure.return_type_for_generate);
+            print_imports(module, out, imports);
 
-        out.newline();
+            out.newline();
 
-        let procedure_name = procedure.name.deref();
-        let func_name = procedure_function_name(procedure);
-        let func_name_with_callback = procedure_function_with_callback_name(procedure);
-        let args_type = function_args_type_name(&procedure.accessor_name);
-        let res_ty_name = type_name(module, &procedure.return_type_for_generate);
+            let procedure_name = procedure.name.deref();
+            let func_name = procedure_function_name(procedure);
+            let func_name_with_callback = procedure_function_with_callback_name(procedure);
+            let args_type = function_args_type_name(&procedure.accessor_name);
+            let res_ty_name = type_name(module, &procedure.return_type_for_generate);
 
-        // Define an "args struct" as a serialization helper.
-        // This is not user-facing, it's not used outside this file.
-        // Unlike with reducers, we don't have to deserialize procedure args to build events,
-        // as we don't broadcast procedure args.
-        define_struct_for_product(
-            module,
-            out,
-            &args_type,
-            &procedure.params_for_generate.elements,
-            // non-pub visibility.
-            "",
-        );
+            // Define an "args struct" as a serialization helper.
+            // This is not user-facing, it's not used outside this file.
+            // Unlike with reducers, we don't have to deserialize procedure args to build events,
+            // as we don't broadcast procedure args.
+            define_struct_for_product(
+                module,
+                out,
+                &args_type,
+                &procedure.params_for_generate.elements,
+                // non-pub visibility.
+                "",
+                false,
+            );
 
-        out.newline();
+            out.newline();
 
-        let FormattedArglist {
-            arglist_no_delimiters,
-            arg_names,
-            ..
-        } = FormattedArglist::for_arguments(module, &procedure.params_for_generate.elements);
+            let FormattedArglist {
+                arglist_no_delimiters,
+                arg_names,
+                ..
+            } = FormattedArglist::for_arguments(module, &procedure.params_for_generate.elements);
 
-        writeln!(
-            out,
-            "
+            let clippy_too_many_arguments =
+                if procedure.params_for_generate.elements.len() + 2 > CLIPPY_TOO_MANY_ARGUMENTS_LIMIT {
+                    "#[allow(clippy::too_many_arguments)]\n"
+                } else {
+                    ""
+                };
+
+            writeln!(
+                out,
+                "
 impl __sdk::InModule for {args_type} {{
     type Module = super::RemoteModule;
 }}
 
-#[allow(non_camel_case_types)]
+{clippy_too_many_arguments}#[allow(non_camel_case_types)]
 /// Extension trait for access to the procedure `{procedure_name}`.
 ///
 /// Implemented for [`super::RemoteProcedures`].
@@ -591,60 +556,67 @@ impl {func_name} for super::RemoteProcedures {{
 "
         );
 
-        OutputFile {
-            filename: procedure_module_name(&procedure.accessor_name) + ".rs",
-            code: output.into_inner(),
-        }
+            OutputFile {
+                filename: procedure_module_name(&procedure.accessor_name) + ".rs",
+                code: output.into_inner(),
+            }
+        })
     }
 
-    fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
+    fn generate_global_files(
+        &self,
+        module: &ModuleDef,
+        options: &CodegenOptions,
+    ) -> Result<Vec<OutputFile>, crate::CodegenError> {
+        Ok({
+            let mut output = CodeIndenter::new(String::new(), INDENT);
+            let out = &mut output;
 
-        print_file_header(out, true);
+            print_file_header(out, true);
 
-        out.newline();
+            out.newline();
 
-        // Declare `pub mod` for each of the files generated.
-        print_module_decls(module, options.visibility, out);
+            // Declare `pub mod` for each of the files generated.
+            print_module_decls(module, options.visibility, out);
 
-        out.newline();
+            out.newline();
 
-        // Re-export all the modules for the generated files.
-        print_module_reexports(module, options.visibility, out);
+            // Re-export all the modules for the generated files.
+            print_module_reexports(module, options.visibility, out);
 
-        out.newline();
+            out.newline();
 
-        // Define `enum Reducer`.
-        print_reducer_enum_defn(module, options.visibility, out);
+            // Define `enum Reducer`.
+            print_reducer_enum_defn(module, options.visibility, out);
 
-        out.newline();
+            out.newline();
 
-        // Define `DbUpdate`.
-        print_db_update_defn(module, options.visibility, out);
+            // Define `DbUpdate`.
+            print_db_update_defn(module, options.visibility, out);
 
-        out.newline();
+            out.newline();
 
-        // Define `AppliedDiff`.
-        print_applied_diff_defn(module, options.visibility, out);
+            // Define `AppliedDiff`.
+            print_applied_diff_defn(module, options.visibility, out);
 
-        out.newline();
+            out.newline();
 
-        // Define `RemoteModule`, `DbConnection`, `EventContext`, `RemoteTables`,
-        // `RemoteReducers`, `RemoteProcedures` and `SubscriptionHandle`.
-        // Note that these do not change based on the module.
-        print_const_db_context_types(out);
+            // Define `RemoteModule`, `DbConnection`, `EventContext`, `RemoteTables`,
+            // `RemoteReducers`, `RemoteProcedures` and `SubscriptionHandle`.
+            // Note that these do not change based on the module.
+            print_const_db_context_types(out);
 
-        out.newline();
+            out.newline();
 
-        // Implement `SpacetimeModule` for `RemoteModule`.
-        // This includes a method for initializing the tables in the client cache.
-        print_impl_spacetime_module(module, options.visibility, out);
+            // Implement `SpacetimeModule` for `RemoteModule`.
+            // This includes a method for initializing the tables in the client cache.
+            print_impl_spacetime_module(module, options.visibility, out);
 
-        vec![OutputFile {
-            filename: "mod.rs".to_string(),
-            code: output.into_inner(),
-        }]
+            vec![OutputFile {
+                filename: "mod.rs".to_string(),
+                code: output.into_inner(),
+            }]
+        })
     }
 }
 
@@ -713,6 +685,7 @@ fn implement_query_col_types_for_table_struct(
 ) -> fmt::Result {
     let type_ref = table.product_type_ref;
     let struct_name = type_ref_name(module, type_ref);
+    let has_single_column_index = iter_indexes(table).any(|index| index.algorithm.columns().len() == 1);
 
     implement_query_col_types_for_struct(module, out, type_ref)?;
     let cols_ix = struct_name.clone() + "IxCols";
@@ -749,8 +722,13 @@ pub struct {cols_ix} {{"
         "
 impl __sdk::__query_builder::HasIxCols for {struct_name} {{
     type IxCols = {cols_ix};
-    fn ix_cols(table_name: &'static str) -> Self::IxCols {{
-        {cols_ix} {{"
+    fn ix_cols({ix_cols_table_name}: &'static str) -> Self::IxCols {{
+        {cols_ix} {{",
+        ix_cols_table_name = if has_single_column_index {
+            "table_name"
+        } else {
+            "_table_name"
+        }
     )?;
     for index in iter_indexes(table) {
         let cols = index.algorithm.columns();
@@ -851,8 +829,8 @@ pub fn write_type<W: Write>(module: &ModuleDef, out: &mut W, ty: &AlgebraicTypeU
             PrimitiveType::U64 => write!(out, "u64")?,
             PrimitiveType::I128 => write!(out, "i128")?,
             PrimitiveType::U128 => write!(out, "u128")?,
-            PrimitiveType::I256 => write!(out, "__sats::i256")?,
-            PrimitiveType::U256 => write!(out, "__sats::u256")?,
+            PrimitiveType::I256 => write!(out, "__sdk::__sats::i256")?,
+            PrimitiveType::U256 => write!(out, "__sdk::__sats::u256")?,
             PrimitiveType::F32 => write!(out, "f32")?,
             PrimitiveType::F64 => write!(out, "f64")?,
         },
@@ -909,16 +887,82 @@ impl FormattedArglist {
     }
 }
 
-const ALLOW_LINTS: &str = "#![allow(unused, clippy::all)]";
+fn generate_type_files(module: &ModuleDef, typ: &TypeDef) -> Vec<OutputFile> {
+    let type_name = collect_case(Case::Pascal, typ.accessor_name.name_segments());
+    let mut output = CodeIndenter::new(String::new(), INDENT);
+    let out = &mut output;
 
-const SPACETIMEDB_IMPORTS: &[&str] = &[
-    "use spacetimedb_sdk::__codegen::{",
-    "\tself as __sdk,",
-    "\t__lib,",
-    "\t__sats,",
-    "\t__ws,",
-    "};",
-];
+    print_file_header(out, false);
+    out.newline();
+
+    let derive_eq_hash = is_primary_key_type(module, typ.ty)
+        && supports_eq_hash(module, &AlgebraicTypeUse::Ref(typ.ty), &mut BTreeSet::new());
+    match &module.typespace_for_generate()[typ.ty] {
+        AlgebraicTypeDef::Product(product) => {
+            gen_and_print_imports(module, out, &product.elements, &[typ.ty]);
+            out.newline();
+            define_struct_for_product(module, out, &type_name, &product.elements, "pub", derive_eq_hash);
+        }
+        AlgebraicTypeDef::Sum(sum) => {
+            gen_and_print_imports(module, out, &sum.variants, &[typ.ty]);
+            out.newline();
+            define_enum_for_sum(module, out, &type_name, &sum.variants, false, derive_eq_hash);
+        }
+        AlgebraicTypeDef::PlainEnum(plain_enum) => {
+            let variants = plain_enum
+                .variants
+                .iter()
+                .cloned()
+                .map(|var| (var, AlgebraicTypeUse::Unit))
+                .collect::<Vec<_>>();
+            define_enum_for_sum(module, out, &type_name, &variants, true, false);
+        }
+    }
+    out.newline();
+
+    writeln!(
+        out,
+        "
+impl __sdk::InModule for {type_name} {{
+    type Module = super::RemoteModule;
+}}
+",
+    );
+
+    // Query columns are only supported on top-level table/view row types.
+    let name = type_ref_name(module, typ.ty);
+    let implemented = match module
+        .tables()
+        .find(|t| type_ref_name(module, t.product_type_ref) == name)
+    {
+        Some(table) => {
+            implement_query_col_types_for_table_struct(module, out, table)
+                .expect("failed to implement query col types");
+            out.newline();
+            true
+        }
+        _ => false,
+    };
+
+    if !implemented
+        && let Some(type_ref) = module
+            .views()
+            .map(|v| v.product_type_ref)
+            .find(|type_ref| type_ref_name(module, *type_ref) == name)
+    {
+        implement_query_col_types_for_struct(module, out, type_ref).expect("failed to implement query col types");
+        out.newline();
+    }
+
+    vec![OutputFile {
+        filename: type_module_name(&typ.accessor_name) + ".rs",
+        code: output.into_inner(),
+    }]
+}
+
+const CLIPPY_TOO_MANY_ARGUMENTS_LIMIT: usize = 7;
+
+const SPACETIMEDB_IMPORTS: &[&str] = &["use spacetimedb_sdk::__codegen as __sdk;"];
 
 fn print_spacetimedb_imports(output: &mut Indenter) {
     print_lines(output, SPACETIMEDB_IMPORTS);
@@ -929,26 +973,123 @@ fn print_file_header(output: &mut Indenter, include_version: bool) {
     if include_version {
         print_auto_generated_version_comment(output);
     }
-    writeln!(output, "{ALLOW_LINTS}");
+    print_lines(output, &["#![allow(unused, clippy::all)]"]);
     print_spacetimedb_imports(output);
 }
 
-// TODO: figure out if/when sum types should derive:
-// - Clone
-// - Debug
-// - Copy
-// - PartialEq, Eq
-// - Hash
-//    - Complicated because `HashMap` is not `Hash`.
-// - others?
-
 const ENUM_DERIVES: &[&str] = &[
-    "#[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]",
-    "#[sats(crate = __lib)]",
+    "#[derive(__sdk::__lib::ser::Serialize, __sdk::__lib::de::Deserialize, Clone, PartialEq, Debug)]",
+    "#[sats(crate = __sdk::__lib)]",
 ];
 
 fn print_enum_derives(output: &mut Indenter) {
     print_lines(output, ENUM_DERIVES);
+}
+
+fn supports_eq_hash(module: &ModuleDef, ty: &AlgebraicTypeUse, visiting: &mut BTreeSet<AlgebraicTypeRef>) -> bool {
+    match ty {
+        AlgebraicTypeUse::Ref(reference) => {
+            if !visiting.insert(*reference) {
+                return true;
+            }
+            let supported = match &module.typespace_for_generate()[*reference] {
+                AlgebraicTypeDef::Product(product) => fields_support_eq_hash(module, &product.elements, visiting),
+                AlgebraicTypeDef::Sum(sum) => fields_support_eq_hash(module, &sum.variants, visiting),
+                AlgebraicTypeDef::PlainEnum(_) => true,
+            };
+            visiting.remove(reference);
+            supported
+        }
+        AlgebraicTypeUse::Array(element) | AlgebraicTypeUse::Option(element) => {
+            supports_eq_hash(module, element, visiting)
+        }
+        AlgebraicTypeUse::Result { ok_ty, err_ty } => {
+            supports_eq_hash(module, ok_ty, visiting) && supports_eq_hash(module, err_ty, visiting)
+        }
+        AlgebraicTypeUse::Primitive(PrimitiveType::F32 | PrimitiveType::F64) | AlgebraicTypeUse::ScheduleAt => false,
+        AlgebraicTypeUse::Primitive(_)
+        | AlgebraicTypeUse::Identity
+        | AlgebraicTypeUse::ConnectionId
+        | AlgebraicTypeUse::Timestamp
+        | AlgebraicTypeUse::TimeDuration
+        | AlgebraicTypeUse::Uuid
+        | AlgebraicTypeUse::Unit
+        | AlgebraicTypeUse::Never
+        | AlgebraicTypeUse::String => true,
+    }
+}
+
+fn fields_support_eq_hash(
+    module: &ModuleDef,
+    fields: &[(Identifier, AlgebraicTypeUse)],
+    visiting: &mut BTreeSet<AlgebraicTypeRef>,
+) -> bool {
+    fields.iter().all(|(_, ty)| supports_eq_hash(module, ty, visiting))
+}
+
+fn contains_type_ref(
+    module: &ModuleDef,
+    ty: &AlgebraicTypeUse,
+    target: AlgebraicTypeRef,
+    visiting: &mut BTreeSet<AlgebraicTypeRef>,
+) -> bool {
+    match ty {
+        AlgebraicTypeUse::Ref(reference) => {
+            if *reference == target {
+                return true;
+            }
+            if !visiting.insert(*reference) {
+                return false;
+            }
+            let found = match &module.typespace_for_generate()[*reference] {
+                AlgebraicTypeDef::Product(product) => product
+                    .elements
+                    .iter()
+                    .any(|(_, field)| contains_type_ref(module, field, target, visiting)),
+                AlgebraicTypeDef::Sum(sum) => sum
+                    .variants
+                    .iter()
+                    .any(|(_, variant)| contains_type_ref(module, variant, target, visiting)),
+                AlgebraicTypeDef::PlainEnum(_) => false,
+            };
+            visiting.remove(reference);
+            found
+        }
+        AlgebraicTypeUse::Array(element) | AlgebraicTypeUse::Option(element) => {
+            contains_type_ref(module, element, target, visiting)
+        }
+        AlgebraicTypeUse::Result { ok_ty, err_ty } => {
+            contains_type_ref(module, ok_ty, target, visiting) || contains_type_ref(module, err_ty, target, visiting)
+        }
+        _ => false,
+    }
+}
+
+fn is_primary_key_type(module: &ModuleDef, target: AlgebraicTypeRef) -> bool {
+    let typespace = module.typespace_for_generate();
+    module.tables().any(|table| {
+        let Some(key) = table.primary_key else {
+            return false;
+        };
+        let AlgebraicTypeDef::Product(product) = &typespace[table.product_type_ref] else {
+            return false;
+        };
+        product
+            .elements
+            .get(key.idx())
+            .is_some_and(|(_, ty)| contains_type_ref(module, ty, target, &mut BTreeSet::new()))
+    }) || module.views().any(|view| {
+        let Some(key) = view.primary_key else {
+            return false;
+        };
+        let AlgebraicTypeDef::Product(product) = &typespace[view.product_type_ref] else {
+            return false;
+        };
+        product
+            .elements
+            .get(key.idx())
+            .is_some_and(|(_, ty)| contains_type_ref(module, ty, target, &mut BTreeSet::new()))
+    })
 }
 
 const PLAIN_ENUM_EXTRA_DERIVES: &[&str] = &["#[derive(Copy, Eq, Hash)]"];
@@ -964,10 +1105,13 @@ pub fn define_enum_for_sum(
     name: &str,
     variants: &[(Identifier, AlgebraicTypeUse)],
     is_plain: bool,
+    derive_eq_hash: bool,
 ) {
     print_enum_derives(out);
     if is_plain {
         print_plain_enum_extra_derives(out);
+    } else if derive_eq_hash {
+        writeln!(out, "#[derive(Eq, Hash)]");
     }
     write!(out, "pub enum {name} ");
 
@@ -1043,18 +1187,9 @@ fn write_arglist_no_delimiters(
     Ok(())
 }
 
-// TODO: figure out if/when product types should derive:
-// - Clone
-// - Debug
-// - Copy
-// - PartialEq, Eq
-// - Hash
-//    - Complicated because `HashMap` is not `Hash`.
-// - others?
-
 const STRUCT_DERIVES: &[&str] = &[
-    "#[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]",
-    "#[sats(crate = __lib)]",
+    "#[derive(__sdk::__lib::ser::Serialize, __sdk::__lib::de::Deserialize, Clone, PartialEq, Debug)]",
+    "#[sats(crate = __sdk::__lib)]",
 ];
 
 fn print_struct_derives(output: &mut Indenter) {
@@ -1067,8 +1202,12 @@ fn define_struct_for_product(
     name: &str,
     elements: &[(Identifier, AlgebraicTypeUse)],
     vis: &str,
+    derive_eq_hash: bool,
 ) {
     print_struct_derives(out);
+    if derive_eq_hash {
+        writeln!(out, "#[derive(Eq, Hash)]");
+    }
 
     write!(out, "{vis} struct {name} ");
 
@@ -1176,6 +1315,8 @@ fn print_module_reexports(module: &ModuleDef, visibility: CodegenVisibility, out
 }
 
 fn print_reducer_enum_defn(module: &ModuleDef, visibility: CodegenVisibility, out: &mut Indenter) {
+    let has_reducers = iter_reducers(module, visibility).next().is_some();
+
     // Don't derive ser/de on this enum;
     // it's not a proper SATS enum and the derive will fail.
     writeln!(out, "#[derive(Clone, PartialEq, Debug)]");
@@ -1237,10 +1378,11 @@ impl __sdk::InModule for Reducer {{
                                 }
                                 writeln!(out, " => {:?},", reducer.name.deref());
                             }
-                            // Write a catch-all pattern to handle the case where the module defines zero reducers,
-                            // 'cause references are always considered inhabited,
-                            // even references to uninhabited types.
-                            writeln!(out, "_ => unreachable!(),");
+                            if !has_reducers {
+                                // A reference to an uninhabited reducer enum is still inhabited,
+                                // so an empty module needs one unreachable arm for exhaustiveness.
+                                writeln!(out, "_ => unreachable!(),");
+                            }
                         },
                         "}\n",
                     );
@@ -1249,7 +1391,7 @@ impl __sdk::InModule for Reducer {{
             );
             writeln!(out, "#[allow(clippy::clone_on_copy)]");
             out.delimited_block(
-                "fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {",
+                "fn args_bsatn(&self) -> Result<Vec<u8>, __sdk::__sats::bsatn::EncodeError> {",
                 |out| {
                     out.delimited_block(
                         "match self {",
@@ -1277,7 +1419,7 @@ impl __sdk::InModule for Reducer {{
 
                                 write!(
                                     out,
-                                    " => __sats::bsatn::to_vec(&{}::{}",
+                                    " => __sdk::__sats::bsatn::to_vec(&{}::{}",
                                     reducer_module_name(&reducer.accessor_name),
                                     function_args_type_name(&reducer.accessor_name)
                                 );
@@ -1292,10 +1434,11 @@ impl __sdk::InModule for Reducer {{
                                     "}),\n",
                                 );
                             }
-                            // Write a catch-all pattern to handle the case where the module defines zero reducers,
-                            // 'cause references are always considered inhabited,
-                            // even references to uninhabited types.
-                            writeln!(out, "_ => unreachable!(),");
+                            if !has_reducers {
+                                // A reference to an uninhabited reducer enum is still inhabited,
+                                // so an empty module needs one unreachable arm for exhaustiveness.
+                                writeln!(out, "_ => unreachable!(),");
+                            }
                         },
                         "}\n",
                     );
@@ -1330,9 +1473,9 @@ fn print_db_update_defn(module: &ModuleDef, visibility: CodegenVisibility, out: 
 
     out.delimited_block(
         "
-impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
+impl TryFrom<__sdk::__ws::v2::TransactionUpdate> for DbUpdate {
     type Error = __sdk::Error;
-    fn try_from(raw: __ws::v2::TransactionUpdate) -> Result<Self, Self::Error> {
+    fn try_from(raw: __sdk::__ws::v2::TransactionUpdate) -> Result<Self, Self::Error> {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
@@ -1435,7 +1578,7 @@ impl __sdk::InModule for DbUpdate {{
             );
 
             out.delimited_block(
-                "fn parse_initial_rows(raw: __ws::v2::QueryRows) -> __sdk::Result<Self> {",
+                "fn parse_initial_rows(raw: __sdk::__ws::v2::QueryRows) -> __sdk::Result<Self> {",
                 |out| {
                     writeln!(out, "let mut db_update = DbUpdate::default();");
                     out.delimited_block(
@@ -1468,7 +1611,7 @@ impl __sdk::InModule for DbUpdate {{
             );
 
             out.delimited_block(
-                "fn parse_unsubscribe_rows(raw: __ws::v2::QueryRows) -> __sdk::Result<Self> {",
+                "fn parse_unsubscribe_rows(raw: __sdk::__ws::v2::QueryRows) -> __sdk::Result<Self> {",
                 |out| {
                     writeln!(out, "let mut db_update = DbUpdate::default();");
                     out.delimited_block(

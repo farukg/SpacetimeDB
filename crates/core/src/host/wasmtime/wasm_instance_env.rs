@@ -30,6 +30,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use wasmtime::{AsContext, Caller, StoreContextMut};
 
+mod http_policy;
+
 /// A stream of bytes which the WASM module can read from
 /// using [`WasmInstanceEnv::bytes_source_read`].
 ///

@@ -8,6 +8,33 @@ import { Identity } from './identity';
 import * as AlgebraicTypeVariants from './algebraic_type_variants';
 import { hasOwn } from './util';
 
+// Map a raw SATS sum-variant wire name (serde camelCase, e.g. "tool", "run",
+// "toolCall") to the ReScript `@tag("tag")` constructor tag the generated
+// bindings discriminate on. This MUST match `rescript_constructor_name` in
+// `sigma-rescript-codegen` (crates/codegen ReScript emitter): the ReScript
+// codegen emits PascalCase constructors (`Tool`, `RUN`, `ToolCall`), so both
+// the serializer (write) and deserializer (read) sides of this SDK have to
+// bridge camelCase-wire <-> PascalCase-tag with the identical transform, or
+// one direction silently mismatches (`switch(tag)` falls through / the
+// serializer throws `unknown tag Tool`).
+function rescriptConstructorTag(name: string): string {
+  // 2-3 char all-lowercase -> acronym recovery (`run` -> `RUN`, `ttl` -> `TTL`).
+  if (name.length >= 2 && name.length <= 3 && /^[a-z]+$/.test(name)) {
+    return name.toUpperCase();
+  }
+  // Already PascalCase (uppercase first, no underscore) -> preserve.
+  if (/^[A-Z]/.test(name) && !name.includes('_')) {
+    return name;
+  }
+  // Otherwise PascalCase the (camelCase/snake_case) wire name.
+  const pascal = name
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join('');
+  return /^[0-9]/.test(pascal) ? `V${pascal}` : pascal;
+}
+
 type TypespaceType = {
   types: AlgebraicTypeType[];
 };
@@ -657,7 +684,7 @@ export const SumType = {
         typespace
       );
       const serializeErr = AlgebraicType.makeSerializer(
-        ty.variants[0].algebraicType,
+        ty.variants[1].algebraicType,
         typespace
       );
 
@@ -675,24 +702,62 @@ export const SumType = {
         }
       };
     } else {
+      // Plain enum fast path: all variants are unit → accept bare strings.
+      // ReScript compiles bare variants to strings ("AG", "GmbH").
+      const isPlainEnum = ty.variants.every(
+        v =>
+          v.algebraicType.tag === 'Product' &&
+          v.algebraicType.value.elements.length === 0
+      );
+      if (isPlainEnum) {
+        const indexMap: Record<string, number> = {};
+        for (let i = 0; i < ty.variants.length; i++) {
+          indexMap[ty.variants[i].name!] = i;
+        }
+        const serializer: Serializer<any> = (writer, value) => {
+          const name = typeof value === 'string' ? value : value.tag;
+          const idx = indexMap[name];
+          if (idx === undefined) {
+            throw new TypeError(
+              `Could not serialize plain enum; unknown variant ${JSON.stringify(name)}`
+            );
+          }
+          writer.writeByte(idx);
+        };
+        SERIALIZERS.set(ty, serializer);
+        return serializer;
+      }
+
       let serializer = SERIALIZERS.get(ty);
       if (serializer != null) return serializer;
 
       const serializers: Record<string, Serializer<any>> = {};
 
       const body = `\
-switch (value.tag) {
+var tag = typeof value === 'string' ? value : value.tag;
+switch (tag) {
 ${ty.variants
-  .map(
-    ({ name }, i) => `\
-  case ${JSON.stringify(name!)}:
+  .map(({ name }, i) => {
+    // The ReScript `@tag("tag")` bindings discriminate on the PascalCase
+    // constructor tag (`rescriptConstructorTag`), while the raw SATS wire name
+    // is serde-camelCase. Accept BOTH so ReScript producers ({tag:"Tool"}) and
+    // raw producers ({tag:"tool"}) serialize identically — the deserializer
+    // emits the PascalCase form, so this keeps read/write symmetric.
+    const raw = name!;
+    const pascal = rescriptConstructorTag(raw);
+    const cases =
+      pascal === raw
+        ? `  case ${JSON.stringify(raw)}:`
+        : `  case ${JSON.stringify(pascal)}:\n  case ${JSON.stringify(raw)}:`;
+    return `\
+${cases}
     writer.writeByte(${i});
-    return this.${name!}(writer, value.value);`
-  )
+    return this.${raw}(writer, typeof value === 'object' ? (value.value !== undefined ? value.value : value._0) : undefined);`;
+  })
   .join('\n')}
   default:
     throw new TypeError(
-      \`Could not serialize sum type; unknown tag \${value.tag}\`
+      \`Could not serialize sum type; unknown tag \${tag}\`
     )
 }
 `;
@@ -780,17 +845,69 @@ ${ty.variants
         }
       };
     } else {
+      // Plain enum fast path: all variants are unit → emit bare strings.
+      // ReScript compiles payloadless variants to bare strings ("Queued"),
+      // so deserialized values must match that shape for === to work.
+      const isPlainEnum = ty.variants.every(
+        v =>
+          v.algebraicType.tag === 'Product' &&
+          (v.algebraicType as AlgebraicTypeVariants.Product).value.elements.length === 0
+      );
+      if (isPlainEnum) {
+        const names: string[] = ty.variants.map(v => v.name!);
+        const deserializer: Deserializer<any> = reader => {
+          const tag = reader.readU8();
+          if (tag < names.length) return names[tag];
+          throw new TypeError(
+            `Can't deserialize plain enum; unknown tag ${tag}`
+          );
+        };
+        DESERIALIZERS.set(ty, deserializer);
+        return deserializer;
+      }
+
       let deserializer = DESERIALIZERS.get(ty);
       if (deserializer != null) return deserializer;
       const deserializers: Record<string, Deserializer<any>> = {};
+      // Emit variants in the exact shape ReScript's @tag("tag") codegen
+      // pattern-matches against — no post-hoc runtime walker needed:
+      //   - Unit variants (empty Product payload) in a mixed sum  → bare
+      //     PascalCase string, matching ReScript `@tag("tag") | Unmatched`
+      //     which compiles to `case "Unmatched":` on the value directly.
+      //   - Payloaded variants → `{tag: "<Pascal>", value: v, _0: v}`,
+      //     matching ReScript's object-shape destructure where the
+      //     compiler accesses `.tag` and `._0` (the `value` alias is
+      //     retained for legacy TypeScript consumers).
+      // Without this, a client-side normalizer (`Stdb__VariantNormalize`)
+      // had to deep-walk every row of every subscribed table to collapse
+      // `{tag: camelName, value: {}, _0: {}}` into the target shape —
+      // ~35s of CPU per hydrate on a 78-table app. The ReScript codegen
+      // dropped that wrapper in the same PR that landed this change;
+      // the two changes are strictly coupled. Reverting one without the
+      // other produces runtime `.toString()` crashes on variant payload
+      // newtypes because the wrong `_0` reaches ReScript pattern code.
+      // The write side (SumType serializer above) MUST use the identical
+      // `rescriptConstructorTag` bridge: it emits PascalCase here, so the
+      // serializer has to accept the PascalCase `value.tag` ReScript produces
+      // (`CommitActor.Tool(..)` -> `{tag:"Tool"}`). A raw-camelCase-only
+      // serializer threw `Could not serialize sum type; unknown tag Tool`.
+      const isUnitVariant = (v: SumTypeVariant) =>
+        v.algebraicType.tag === 'Product' &&
+        (v.algebraicType as AlgebraicTypeVariants.Product).value.elements.length === 0;
       deserializer = Function(
         'reader',
         `switch (reader.readU8()) {\n${ty.variants
-          .map(
-            ({ name }, i) =>
-              `case ${i}: return { tag: ${JSON.stringify(name!)}, value: this.${name!}(reader) };`
-          )
-          .join('\n')} }`
+          .map(({ name }, i) => {
+            const cap = rescriptConstructorTag(name!);
+            if (isUnitVariant(ty.variants[i])) {
+              return `case ${i}: { this.${name!}(reader); return ${JSON.stringify(cap)}; }`;
+            }
+            return `case ${i}: { const v = this.${name!}(reader); return { tag: ${JSON.stringify(cap)}, value: v, _0: v }; }`;
+          })
+          .join('\n')}
+  default:
+    throw new TypeError(\`Can't deserialize sum type; unknown tag \${reader.view.getUint8(reader.offset - 1)} for variants [${ty.variants.map(v => JSON.stringify(v.name!)).join(', ')}]\`);
+}`
       ).bind(deserializers) as Deserializer<any>;
       // In case `ty` is recursive, we cache the function *before* before computing
       // `deserializers`, so that a recursive `makeDeserializer` with the same `ty` has

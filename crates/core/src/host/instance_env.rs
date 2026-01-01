@@ -37,6 +37,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::vec::IntoIter;
 
+mod http_policy;
+
 pub struct InstanceEnv {
     pub replica_ctx: Arc<ReplicaContext>,
     pub scheduler: Scheduler,
@@ -931,21 +933,11 @@ impl InstanceEnv {
             return Err(NodesError::HttpError(BLOCKED_HTTP_ADDRESS_ERROR.to_string()));
         }
 
-        let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
-            if is_blocked_ip_literal(attempt.url()) {
-                attempt.error(BLOCKED_HTTP_ADDRESS_ERROR)
-            } else {
-                reqwest::redirect::Policy::default().redirect(attempt)
-            }
-        });
-
         // TODO(procedure-metrics): record size in bytes of response, time spent awaiting response.
 
         // Actually execute the HTTP request!
         // TODO(perf): Stash a long-lived `Client` in the env somewhere, rather than building a new one for each call.
-        let execute_fut = reqwest::Client::builder()
-            .dns_resolver(Arc::new(FilteredDnsResolver))
-            .redirect(redirect_policy)
+        let execute_fut = http_policy::legacy_client_builder()
             .build()
             .map_err(http_error)?
             .execute(reqwest);
@@ -1217,7 +1209,7 @@ fn convert_http_request(request: st_http::Request) -> http::Result<(http::reques
         st_http::Method::Options => http::Method::OPTIONS,
         st_http::Method::Trace => http::Method::TRACE,
         st_http::Method::Patch => http::Method::PATCH,
-        st_http::Method::Extension(method) => http::Method::from_bytes(method.as_bytes()).expect("Invalid HTTP method"),
+        st_http::Method::Extension(method) => http::Method::from_bytes(method.as_bytes())?,
     };
     // The error type here, `http::uri::InvalidUri`, doesn't contain the URI itself,
     // so it's safe to return and to log.

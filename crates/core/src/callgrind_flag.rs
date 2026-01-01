@@ -24,9 +24,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 /// 1. Wrap your target code of interest with `invoke_allowing_callgrind`.
 /// 2. In code that invokes that (possibly from another thread), wrap the code of interest with `enable_callgrind_globally`.
 /// 3. Invoke callgrind on your executable with the flags:
-///    `--collect-atstart=no --toggle-collect=`spacetimedb::callgrind_flag::flag*`
+///    `--collect-atstart=no --toggle-collect=`spacetimedb_core::callgrind_flag::flag*`
 ///    Or, if using our fork of iai callgrind (https://github.com/clockworklabs/iai-callgrind), use:
-///    `LibraryBenchmarkConfig::default().with_custom_entry_point("spacetimedb::callgrind_flag::flag")`;
+///    `LibraryBenchmarkConfig::default().with_custom_entry_point("spacetimedb_core::callgrind_flag::flag")`;
 static CALLGRIND_ENABLED: AtomicU32 = AtomicU32::new(0);
 
 /// Invoke a function, enabling callgrind on all threads.

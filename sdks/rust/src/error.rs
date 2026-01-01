@@ -82,23 +82,58 @@ impl std::fmt::Display for InternalError {
 }
 
 impl std::error::Error for InternalError {
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        // `self.cause.as_deref()`,
-        // except that formulation is unable to convert our `dyn Error + Send + Sync`
-        // into a `dyn Error`.
-        // See [this StackOverflow answer](https://stackoverflow.com/questions/63810977/strange-behavior-when-adding-the-send-trait-to-a-boxed-trait-object).
-        if let Some(cause) = &self.cause {
-            Some(cause)
-        } else {
-            None
-        }
-    }
     fn description(&self) -> &str {
         &self.message
     }
+
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
+        self.cause
+            .as_deref()
+            .map(|cause| cause as &(dyn std::error::Error + 'static))
     }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+
+    #[test]
+    fn internal_error_without_cause_has_no_source() {
+        let error = InternalError::new("outer context");
+        assert!(error.source().is_none());
+        assert!(error.clone().source().is_none());
+        assert_eq!(error.to_string(), "outer context");
+    }
+
+    #[test]
+    fn internal_error_source_is_the_stored_error_not_its_arc() {
+        let error = InternalError::new("outer context").with_cause(Error::Disconnected);
+        let source = error.source().unwrap().downcast_ref::<Error>().unwrap();
+        assert!(matches!(source, Error::Disconnected));
+
+        let cloned = error.clone();
+        let cloned_source = cloned.source().unwrap().downcast_ref::<Error>().unwrap();
+        assert!(std::ptr::eq(source, cloned_source));
+        assert_eq!(
+            error.to_string(),
+            "outer context: Connection is already disconnected or has terminated normally",
+        );
+    }
+
+    #[test]
+    fn internal_error_source_preserves_nested_typed_causes() {
+        let inner = InternalError::new("inner context")
+            .with_cause(std::io::Error::new(std::io::ErrorKind::TimedOut, "fixture timeout"));
+        let error = InternalError::new("outer context").with_cause(inner);
+
+        let inner = error.source().unwrap().downcast_ref::<InternalError>().unwrap();
+        let cause = inner.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
+        assert_eq!(cause.kind(), std::io::ErrorKind::TimedOut);
+        assert!(cause.source().is_none());
+        assert_eq!(error.to_string(), "outer context: inner context: fixture timeout");
+    }
+}
+

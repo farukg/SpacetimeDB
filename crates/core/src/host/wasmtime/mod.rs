@@ -1,6 +1,6 @@
 use self::wasm_instance_env::WasmInstanceEnv;
-use super::wasm_common::module_host_actor::{InitializationError, WasmModuleHostActor, WasmModuleInstance};
-use super::wasm_common::{abi, ModuleCreationError};
+use super::wasm_common::module_host_actor::{WasmModuleHostActor, WasmModuleInstance};
+use super::wasm_common::ModuleCreationError;
 use crate::config::WasmConfig;
 use crate::energy::FunctionBudget;
 use crate::error::NodesError;
@@ -156,23 +156,15 @@ impl WasmtimeRuntime {
         let module =
             wasmtime::Module::new(&self.sync_engine, program_bytes).map_err(ModuleCreationError::WasmCompileError)?;
 
-        let func_imports = module
-            .imports()
-            .filter(|imp| matches!(imp.ty(), wasmtime::ExternType::Func(_)));
-        let abi = abi::determine_spacetime_abi(func_imports, |imp| imp.module())?;
-
-        abi::verify_supported(WasmtimeModule::IMPLEMENTED_ABI, abi)?;
-
-        let module = self
-            .sync_linker
-            .instantiate_pre(&module)
-            .map_err(InitializationError::Instantiation)?;
+        let module =
+            wasmtime_module::instantiate_pre_checked(&self.sync_linker, &module, WasmtimeModule::IMPLEMENTED_ABI)?;
         let procedure_module =
             wasmtime::Module::new(&self.async_engine, program_bytes).map_err(ModuleCreationError::WasmCompileError)?;
-        let procedure_module = self
-            .async_linker
-            .instantiate_pre(&procedure_module)
-            .map_err(InitializationError::Instantiation)?;
+        let procedure_module = wasmtime_module::instantiate_pre_checked(
+            &self.async_linker,
+            &procedure_module,
+            WasmtimeModule::IMPLEMENTED_ABI,
+        )?;
 
         let module = WasmtimeModule::new(module);
         let procedure_module = WasmtimeAsyncModule::new(procedure_module);

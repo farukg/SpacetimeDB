@@ -5,7 +5,17 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use toml::Value;
 
+#[path = "src/build_support.rs"]
+mod build_support;
+
 fn main() {
+    // Force build.rs re-run when SPACETIMEDB_CI_BUILD flips (e.g. first build
+    // after fork adopted the CI stub). Without this, cargo's mtime-fingerprint
+    // would skip build.rs on mtime-stable builds, leaving a stale cached
+    // embedded_templates.rs in OUT_DIR that still has include_str!() refs to
+    // the (non-existent in CI) crates/cli/.templates/ → 453 compile errors.
+    println!("cargo:rerun-if-env-changed=SPACETIMEDB_CI_BUILD");
+
     let git_hash = find_git_hash();
     println!("cargo:rustc-env=GIT_HASH={git_hash}");
 
@@ -58,13 +68,31 @@ fn get_manifest_dir() -> PathBuf {
 //                            templates list at templates/templates-list.json
 //   * `get_skill` - returns the content of a skill file by name
 fn generate_template_files() {
-    let manifest_dir = get_manifest_dir();
-    let repo_root = get_repo_root();
-    let templates_dir = repo_root.join("templates");
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("embedded_templates.rs");
 
-    println!("cargo:rerun-if-changed=../../templates");
+    // CI builds (container-cargo-build.sh sets SPACETIMEDB_CI_BUILD=1) don't
+    // need template embedding: `spacetime init` is a runtime user-facing
+    // feature, not used during artifact production. Skipping avoids the
+    // `crates/cli/.templates/` ephemeral copy step that breaks mtime-stable
+    // builds (the copy lives outside target/, so cargo's fingerprint-skip
+    // leaves it stale → include_str! compile failure on next build).
+    if std::env::var("SPACETIMEDB_CI_BUILD").ok().as_deref() == Some("1") {
+        std::fs::write(&dest_path, "use spacetimedb_data_structures::map::HashMap;\n\npub fn get_templates_json() -> &'static str { \"\" }\n\npub fn get_template_files() -> HashMap<&'static str, HashMap<&'static str, &'static str>> { HashMap::new() }\n\npub fn get_skill(_name: &str) -> Option<&'static str> { None }\n\npub fn get_workspace_edition() -> &'static str { \"2021\" }\n\npub fn get_workspace_dependency_version(_name: &str) -> Option<&'static str> { None }\n\npub fn get_typescript_bindings_version() -> &'static str { \"0.0.0-ci\" }\n").expect("Failed to write CI stub embedded_templates.rs");
+        return;
+    }
+
+    let manifest_dir = get_manifest_dir();
+    let repo_root = get_repo_root();
+    let templates_dir = repo_root.join("templates");
+
+    for entry in std::fs::read_dir(&templates_dir).expect("Failed to read templates") {
+        let entry = entry.expect("Failed to read template entry");
+        let metadata = entry.path().join(".template.json");
+        if metadata.is_file() {
+            println!("cargo:rerun-if-changed={}", metadata.display());
+        }
+    }
 
     let discovered_templates = discover_templates(&templates_dir);
 
@@ -313,20 +341,19 @@ fn generate_template_entry(code: &mut String, template_path: &Path, source: &str
         // Example: /Users/user/SpacetimeDB/modules/quickstart-chat/src/lib.rs
         let full_path = repo_root.join(&file_path);
         if full_path.exists() && full_path.is_file() {
+            let source_path = full_path.canonicalize().unwrap();
             let include_path = if let Some(ref copy_dir) = local_copy_dir {
                 // Outside crate: copy to .templates
                 // Example dest_file: /Users/user/SpacetimeDB/crates/cli/.templates/parent_parent_modules_chat-console-rs/src/lib.rs
                 let dest_file = copy_dir.join(relative_path);
                 fs::create_dir_all(dest_file.parent().unwrap()).expect("Failed to create parent directory");
-                copy_if_changed(&full_path, &dest_file)
+                copy_if_changed(&source_path, &dest_file)
                     .unwrap_or_else(|_| panic!("Failed to copy file {:?} to {:?}", full_path, dest_file));
 
                 // Example relative_to_manifest: .templates/parent_parent_modules_chat-console-rs/src/lib.rs
                 let relative_to_manifest = dest_file.strip_prefix(manifest_dir).unwrap();
                 let path_str = relative_to_manifest.to_str().unwrap().replace("\\", "/");
-                // Watch the original file for changes
-                // Example: modules/chat-console-rs/src/lib.rs
-                println!("cargo:rerun-if-changed={}", full_path.display());
+                println!("cargo:rerun-if-changed={}", source_path.display());
                 path_str
             } else {
                 // Inside crate: use path relative to CARGO_MANIFEST_DIR
@@ -335,8 +362,7 @@ fn generate_template_entry(code: &mut String, template_path: &Path, source: &str
                 // Result: templates/basic-rs/server/src/lib.rs
                 let relative_to_manifest = file_path.strip_prefix(manifest_rel).unwrap();
                 let path_str = relative_to_manifest.to_str().unwrap().replace("\\", "/");
-                // Example: crates/cli/templates/basic-rs/server/src/lib.rs
-                println!("cargo:rerun-if-changed={}", full_path.display());
+                println!("cargo:rerun-if-changed={}", source_path.display());
                 path_str
             };
 
@@ -344,8 +370,13 @@ fn generate_template_entry(code: &mut String, template_path: &Path, source: &str
             // Example include_path (outside crate): ".templates/parent_parent_modules_chat-console-rs/src/lib.rs"
             // Example relative_str: "src/lib.rs"
             code.push_str(&format!(
-                "        files.insert(\"{}\", include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{}\")));\n",
-                relative_str, include_path
+                "        files.insert(\"{}\", include_str!(\"{}\"));\n",
+                relative_str,
+                if local_copy_dir.is_some() {
+                    manifest_dir.join(include_path).display().to_string()
+                } else {
+                    source_path.display().to_string()
+                }
             ));
         }
     }
@@ -361,8 +392,10 @@ fn get_git_tracked_files(path: &Path, manifest_dir: &Path) -> (Vec<PathBuf>, Pat
         // so we just list all of the files.
         list_all_files(path, manifest_dir)
     } else {
-        // When building outside of Nix, we invoke `git` to list all the tracked files.
-        get_git_tracked_files_via_cli(path, manifest_dir)
+        match get_git_tracked_files_via_cli(path, manifest_dir) {
+            Some(result) => result,
+            None => list_all_files(path, manifest_dir),
+        }
     }
 }
 
@@ -378,41 +411,14 @@ fn list_all_files(path: &Path, manifest_dir: &Path) -> (Vec<PathBuf>, PathBuf) {
 
     let repo_root = get_repo_root();
 
-    let mut files = Vec::new();
-    ls_recursively(&template_root_absolute, &repo_root, &mut files);
+    let files = build_support::list_source_files(&template_root_absolute, &repo_root).unwrap_or_else(|error| {
+        panic!(
+            "Failed to enumerate template files under {}: {error}",
+            template_root_absolute.display()
+        )
+    });
 
     (files, make_repo_root_relative(&template_root_absolute, &repo_root))
-}
-
-/// Get all the paths of files within `root_dir`,
-/// transform them into paths relative to `repo_root`,
-/// and insert them into `out`.
-fn ls_recursively(root_dir: &Path, repo_root: &Path, out: &mut Vec<PathBuf>) {
-    for dir_ent in std::fs::read_dir(root_dir).unwrap_or_else(|err| {
-        panic!(
-            "Failed to read_dir from template directory {}: {err:#?}",
-            root_dir.display()
-        )
-    }) {
-        let dir_ent = dir_ent.unwrap_or_else(|err| {
-            panic!(
-                "Got error during read_dir from template directory {}: {err:#?}",
-                root_dir.display(),
-            )
-        });
-        let file_path = dir_ent.path();
-        let file_type = dir_ent.file_type().unwrap_or_else(|err| {
-            panic!(
-                "Failed to get file_type for template file {}: {err:#?}",
-                file_path.display(),
-            )
-        });
-        if file_type.is_dir() {
-            ls_recursively(&file_path, repo_root, out);
-        } else {
-            out.push(make_repo_root_relative(&file_path, repo_root));
-        }
-    }
 }
 
 /// Treat `relative_path` as a relative path within the repo root's templates directory
@@ -442,7 +448,7 @@ fn make_repo_root_relative(full_path: &Path, repo_root: &Path) -> PathBuf {
         })
 }
 
-fn get_git_tracked_files_via_cli(path: &Path, manifest_dir: &Path) -> (Vec<PathBuf>, PathBuf) {
+fn get_git_tracked_files_via_cli(path: &Path, manifest_dir: &Path) -> Option<(Vec<PathBuf>, PathBuf)> {
     let repo_root = get_repo_root();
     let repo_root = repo_root.canonicalize().unwrap_or_else(|err| {
         panic!(
@@ -453,14 +459,17 @@ fn get_git_tracked_files_via_cli(path: &Path, manifest_dir: &Path) -> (Vec<PathB
 
     let resolved_path = make_repo_root_relative(&get_full_path_within_manifest_dir(path, manifest_dir), &repo_root);
 
-    let output = Command::new("git")
+    let output = match Command::new("git")
         .args(["ls-files", resolved_path.to_str().unwrap()])
         .current_dir(repo_root)
         .output()
-        .expect("Failed to execute git ls-files");
+    {
+        Ok(output) => output,
+        Err(_) => return None,
+    };
 
     if !output.status.success() {
-        return (Vec::new(), resolved_path);
+        return None;
     }
 
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -470,7 +479,7 @@ fn get_git_tracked_files_via_cli(path: &Path, manifest_dir: &Path) -> (Vec<PathB
         .map(PathBuf::from)
         .collect();
 
-    (files, resolved_path)
+    Some((files, resolved_path))
 }
 
 fn get_repo_root() -> PathBuf {

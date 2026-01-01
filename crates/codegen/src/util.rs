@@ -28,6 +28,8 @@ use spacetimedb_schema::{
     type_for_generate::AlgebraicTypeUse,
 };
 
+/// Controls table handles and schema-private callable exports, not type availability.
+/// Named types remain available for the complete public request/response closure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CodegenVisibility {
     IncludePrivate,

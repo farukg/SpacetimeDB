@@ -70,6 +70,81 @@ import {
   forEachServerMessageV3,
 } from './websocket_v3_frames.ts';
 
+// ── SIG fork: normalize bare-string primitives in remoteModule ──────────────
+// ReScript @unboxed compiles SATS primitives (U64, Bool, etc.) to bare strings
+// at runtime. The rest of the SDK expects {tag: "U64"} objects. This walks the
+// remoteModule tree once at construction and wraps any bare-string algebraicType
+// into {tag: string}. Compound types recurse: Product/Sum payload leaves are
+// also bare strings and feed makeSerializer/makeDeserializer slot tables —
+// a non-recursive walk leaves those slots undefined and crashes at call time
+// ("this.<field> is not a function"). This is the ONLY place where bare-string
+// normalization happens; after this, the entire SDK sees clean objects.
+//
+// Cost model: normalization is identity-memoized. The generated schema shares
+// named-type nodes (one `let` binding per named type, referenced by many
+// tables/reducers), so each unique object node is visited exactly once —
+// WeakSet-guarded against revisits (measured on VR: 5155 raw visits collapse
+// to 2251 unique nodes). The module object itself is also guarded, so
+// reconstructing a DbConnection over the same remoteModule skips the walk
+// entirely. Serializer caches downstream key on node identity too, which the
+// in-place mutation preserves.
+const NORMALIZED_NODES = new WeakSet<object>();
+
+function normalizeAlg(t: any): any {
+  if (typeof t === 'string') return { tag: t };
+  if (t == null || NORMALIZED_NODES.has(t)) return t;
+  NORMALIZED_NODES.add(t);
+  switch (t.tag) {
+    case 'Product':
+      if (t.value?.elements) {
+        for (const e of t.value.elements) e.algebraicType = normalizeAlg(e.algebraicType);
+      }
+      return t;
+    case 'Sum':
+      if (t.value?.variants) {
+        for (const v of t.value.variants) v.algebraicType = normalizeAlg(v.algebraicType);
+      }
+      return t;
+    case 'Array':
+      t.value = normalizeAlg(t.value);
+      return t;
+    default:
+      return t;
+  }
+}
+
+function normalizeRemoteModule(rm: any): any {
+  if (NORMALIZED_NODES.has(rm)) return rm;
+  NORMALIZED_NODES.add(rm);
+  for (const table of Object.values(rm.tables)) {
+    const t = table as any;
+    if (t.rowType?.elements) {
+      for (const e of t.rowType.elements) e.algebraicType = normalizeAlg(e.algebraicType);
+    }
+    if (t.columns) {
+      for (const col of Object.values(t.columns)) {
+        const c = col as any;
+        if (c.typeBuilder) c.typeBuilder.algebraicType = normalizeAlg(c.typeBuilder.algebraicType);
+      }
+    }
+  }
+  for (const reducer of rm.reducers) {
+    if (reducer.paramsType?.elements) {
+      for (const e of reducer.paramsType.elements) e.algebraicType = normalizeAlg(e.algebraicType);
+    }
+  }
+  for (const proc of rm.procedures) {
+    if (proc.returnType) proc.returnType.algebraicType = normalizeAlg(proc.returnType.algebraicType);
+    if (proc.params) {
+      for (const v of Object.values(proc.params)) {
+        const p = v as any;
+        if (p.algebraicType) p.algebraicType = normalizeAlg(p.algebraicType);
+      }
+    }
+  }
+  return rm;
+}
+
 export {
   DbConnectionBuilder,
   SubscriptionBuilderImpl,
@@ -257,7 +332,7 @@ export class DbConnectionImpl<RemoteModule extends UntypedRemoteModule>
     this.identity = identity;
     this.token = token;
 
-    this.#remoteModule = remoteModule;
+    this.#remoteModule = normalizeRemoteModule(remoteModule);
     this.#emitter = emitter;
     this.#boundSubscriptionBuilder = this.subscriptionBuilder.bind(this);
     this.#boundDisconnect = this.disconnect.bind(this);

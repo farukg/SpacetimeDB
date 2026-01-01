@@ -2,11 +2,10 @@ use super::{
     committed_state::{CommitTableForInsertion, CommittedState},
     datastore::{Result, TxMetrics},
     delete_table::DeleteTable,
-    sequence::{Sequence, SequencesState},
     state_view::{IterByColEqMutTx, IterByColRangeMutTx, IterMutTx, StateView},
     tx::TxId,
     tx_state::{IndexIdMap, PendingSchemaChange, TxState, TxTableForInsertion},
-    SharedMutexGuard, SharedWriteGuard,
+    SharedWriteGuard,
 };
 use crate::{
     error::ViewError,
@@ -36,15 +35,14 @@ use crate::{
 };
 use core::{cell::RefCell, iter, mem, ops::RangeBounds};
 use itertools::Either;
+use rand::Rng;
+use rand_xoshiro::Xoshiro128PlusPlus;
 use smallvec::SmallVec;
 use spacetimedb_data_structures::map::{HashMap, HashSet, IntMap};
 use spacetimedb_durability::TxOffset;
 use spacetimedb_execution::{dml::MutDatastore, Datastore, DeltaStore, Row};
 use spacetimedb_lib::{
-    db::raw_def::v9::RawSql,
-    db::{auth::StAccess, raw_def::SEQUENCE_ALLOCATION_STEP},
-    metrics::ExecutionMetrics,
-    ConnectionId, Identity, Timestamp,
+    db::auth::StAccess, db::raw_def::v9::RawSql, metrics::ExecutionMetrics, ConnectionId, Identity, Timestamp,
 };
 use spacetimedb_primitives::{
     col_list, ArgId, ColId, ColList, ColSet, ConstraintId, IndexId, ScheduleId, SequenceId, TableId, ViewId,
@@ -75,6 +73,15 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+
+/// A sequence cursor advanced by [`MutTxId::advance_sequences_past_column_max`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SequenceCursorRepair {
+    pub sequence_name: RawIdentifier,
+    pub table_id: TableId,
+    pub previous_allocated: i128,
+    pub repaired_allocated: i128,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ViewCallInfo {
@@ -275,7 +282,6 @@ pub enum FuncCallType {
 pub struct MutTxId {
     pub(super) tx_state: TxState,
     pub(super) committed_state_write_lock: SharedWriteGuard<CommittedState>,
-    pub(super) sequence_state_lock: SharedMutexGuard<SequencesState>,
     pub(super) lock_wait_time: Duration,
     pub(super) read_sets: ViewReadSets,
     // TODO(cloutiertyler): The below were made `pub` for the datastore split. We should
@@ -287,7 +293,7 @@ pub struct MutTxId {
     pub(crate) _not_send: PhantomData<std::rc::Rc<()>>,
 }
 
-static_assert_size!(MutTxId, 464);
+static_assert_size!(MutTxId, 448);
 
 impl MutTxId {
     /// Record that a view performs a table scan in this transaction's read set
@@ -1317,19 +1323,14 @@ impl MutTxId {
         // Store sequence values to restore them later with new table.
         // Using a map from name to value as the new sequence ids will be different.
         // and I am not sure if we should rely on the order of sequences in the table schema.
-        let mut seq_values: HashMap<_, (i128, i128)> = HashMap::default();
+        let mut seq_values: HashMap<_, i128> = HashMap::default();
         for seq in &original_table_schema.sequences {
-            let value = self
-                .sequence_state_lock
-                .get_sequence_mut(seq.sequence_id)
-                .expect("sequence exists in original schema and should in sequence state.")
-                .get_value();
             let allocated = self
                 .iter_by_col_eq(ST_SEQUENCE_ID, StSequenceFields::SequenceId, &seq.sequence_id.into())?
                 .last()
                 .ok_or(SequenceError::NotFound(seq.sequence_id))?
                 .read_col(StSequenceFields::Allocated)?;
-            seq_values.insert(seq.sequence_name.clone(), (value, allocated));
+            seq_values.insert(seq.sequence_name.clone(), allocated);
         }
 
         // Drop existing table first due to unique constraints on table name in `st_table`
@@ -1364,32 +1365,22 @@ impl MutTxId {
     /// schema change (for example `add_columns_to_table`).
     ///
     /// `create_table(...)` generates fresh table/sequence IDs and inserts fresh
-    /// rows into `st_sequence`. We then restore preserved `(value, allocated)`
+    /// rows into `st_sequence`. We then restore preserved `allocated`
     /// by sequence name:
-    /// - update in-memory sequence state (`SequencesState`) so this process keeps
-    ///   allocating from the same point;
     /// - patch the newly created `st_sequence` row so reopen/replay restores the
     ///   same allocation cursor instead of sequence start.
     fn create_table_and_update_seq(
         &mut self,
         table_schema: TableSchema,
-        seq_values: HashMap<RawIdentifier, (i128, i128)>,
+        seq_values: HashMap<RawIdentifier, i128>,
     ) -> Result<TableId> {
         let table_id = self.create_table(table_schema)?;
         let table_schema = self.schema_for_table(table_id)?;
 
         for seq in table_schema.sequences.iter() {
-            let (value, allocated) = *seq_values
+            let allocated = *seq_values
                 .get(&seq.sequence_name)
-                .ok_or_else(|| SequenceError::NotFound(seq.sequence_id))?;
-            {
-                let new_seq = self
-                    .sequence_state_lock
-                    .get_sequence_mut(seq.sequence_id)
-                    .expect("sequence just created");
-                new_seq.update_value(value);
-                new_seq.update_allocation(allocated);
-            }
+                .ok_or(SequenceError::NotFound(seq.sequence_id))?;
 
             // This updates the new `st_sequence` row created by `create_table(...)`
             // above (old table rows are already dropped).
@@ -1694,12 +1685,7 @@ impl MutTxId {
     }
 
     pub fn get_next_sequence_value(&mut self, seq_id: SequenceId) -> Result<i128> {
-        get_next_sequence_value(
-            &mut self.tx_state,
-            &self.committed_state_write_lock,
-            &mut self.sequence_state_lock,
-            seq_id,
-        )
+        get_next_sequence_value(&mut self.tx_state, &mut self.committed_state_write_lock, seq_id)
     }
 }
 
@@ -1713,32 +1699,30 @@ pub enum IndexScanPointOrRange<'de, 'a> {
     Range(IndexScanRanged<'a>),
 }
 
-fn get_sequence_mut(seq_state: &mut SequencesState, seq_id: SequenceId) -> Result<&mut Sequence> {
-    seq_state
-        .get_sequence_mut(seq_id)
-        .ok_or_else(|| SequenceError::NotFound(seq_id).into())
+const SEQUENCE_SIMULATED_ALLOCATION_CHUNK: u16 = 4096;
+
+/// Should the next sequence allocation skip values?
+///
+/// We don't want users to depend on sequence values being strictly sequential,
+/// as we have in the past and may in the future used optimizations that would cause values to be skipped.
+/// To prevent this, [`get_next_sequence_value`] occasionally simulates a skip ahead.
+///
+/// The supplied `rng` should be the one in the committed state for this purpose,
+/// so that tests which rely on auto-inc sequences will be deterministic.
+/// See [`CommittedState::sequence_advance_simulate_reallocation_rng`].
+fn should_simulate_sequence_reallocation(rng: &mut Xoshiro128PlusPlus) -> bool {
+    // Skip an average of once every 4096 values, the same as the chunk size.
+    // Chosen completely arbitrarily.
+    rng.random::<u16>().is_multiple_of(SEQUENCE_SIMULATED_ALLOCATION_CHUNK)
 }
 
 fn get_next_sequence_value(
     tx_state: &mut TxState,
-    committed_state: &CommittedState,
-    seq_state: &mut SequencesState,
+    committed_state: &mut CommittedState,
     seq_id: SequenceId,
 ) -> Result<i128> {
-    {
-        let sequence = get_sequence_mut(seq_state, seq_id)?;
-
-        // If there are allocated sequence values, return the new value.
-        // `gen_next_value` internally checks that the new allocation is acceptable,
-        // i.e. is less than or equal to the allocation amount.
-        // Note that on restart we start one after the allocation amount.
-        if let Some(value) = sequence.gen_next_value() {
-            return Ok(value);
-        }
-    }
-
-    // Allocate new sequence values
-    // If we're out of allocations, then update the sequence row in st_sequences to allocate a fresh batch of sequences.
+    // Allocate a new sequence value
+    // Read and update the `st_sequence` row to record the new value.
     let old_seq_row_ref = iter_by_col_eq(
         tx_state,
         committed_state,
@@ -1749,13 +1733,35 @@ fn get_next_sequence_value(
     .last()
     .unwrap();
     let old_seq_row_ptr = old_seq_row_ref.pointer();
-    let seq_row = {
+    let (seq_row, value) = {
         let mut seq_row = StSequenceRow::try_from(old_seq_row_ref)?;
 
-        let sequence = get_sequence_mut(seq_state, seq_id)?;
-        let new_allocated = sequence.allocate_steps(SEQUENCE_ALLOCATION_STEP as usize);
-        seq_row.allocated = new_allocated;
-        seq_row
+        let value = seq_row.allocated;
+
+        // We don't want users to depend on sequence values being strictly sequential,
+        // as we have in the past and may in the future used optimizations that would cause values to be skipped.
+        // To prevent this, skip sequence values at a low rate.
+        if should_simulate_sequence_reallocation(&mut committed_state.sequence_advance_simulate_reallocation_rng) {
+            // Simulate an event where you skip to the next block of 4096 values.
+            // Do this by masking off the low 11 bits of the counter,
+            // then incrementing the 12th bit,
+            // resulting in a value that is strictly larger than the previous value,
+            // and which is divisible by 4096.
+            let mask = !(SEQUENCE_SIMULATED_ALLOCATION_CHUNK as i128 - 1);
+            let lower = seq_row.allocated & mask;
+            let higher = lower
+                .checked_add(SEQUENCE_SIMULATED_ALLOCATION_CHUNK as i128)
+                .ok_or(SequenceError::Overflow(value))?;
+            assert!(higher > value);
+
+            seq_row.allocated = higher;
+        } else {
+            seq_row.allocated = value
+                .checked_add(SequenceSchema::INCREMENT)
+                .ok_or(SequenceError::Overflow(value))?;
+        };
+
+        (seq_row, value)
     };
 
     delete(tx_state, committed_state, ST_SEQUENCE_ID, old_seq_row_ptr)?;
@@ -1767,12 +1773,10 @@ fn get_next_sequence_value(
     //   has ID 0, and would otherwise trigger autoinc.
     with_sys_table_buf(|buf| {
         to_writer(buf, &seq_row).unwrap();
-        insert::<false>(tx_state, committed_state, seq_state, ST_SEQUENCE_ID, buf)
+        insert::<false>(tx_state, committed_state, ST_SEQUENCE_ID, buf)
     })?;
 
-    get_sequence_mut(seq_state, seq_id)?
-        .gen_next_value()
-        .ok_or_else(|| SequenceError::UnableToAllocate(seq_id).into())
+    Ok(value)
 }
 
 impl MutTxId {
@@ -1815,10 +1819,10 @@ impl MutTxId {
             table_id,
             col_pos: seq.col_pos,
             allocated: seq.start,
-            increment: seq.increment,
+            increment: SequenceSchema::INCREMENT,
             start: seq.start,
-            min_value: seq.min_value,
-            max_value: seq.max_value,
+            min_value: SequenceSchema::MIN_VALUE,
+            max_value: SequenceSchema::MAX_VALUE,
         };
         let row = self.insert_via_serialize_bsatn(ST_SEQUENCE_ID, &sequence_row)?;
         let seq_id = row.1.collapse().read_col(StSequenceFields::SequenceId)?;
@@ -1828,7 +1832,6 @@ impl MutTxId {
         let ((tx_table, ..), (commit_table, ..)) = self.get_or_create_insert_table_mut(table_id)?;
         // This won't clone-write when creating a table but likely to otherwise.
         tx_table.with_mut_schema_and_clone(commit_table, |s| s.update_sequence(schema.clone()));
-        self.sequence_state_lock.insert(Sequence::new(schema, None));
         self.push_schema_change(PendingSchemaChange::SequenceAdded(table_id, seq_id));
 
         log::trace!("SEQUENCE CREATED: id = {seq_id}");
@@ -1847,18 +1850,13 @@ impl MutTxId {
         // Delete from system tables.
         self.delete(ST_SEQUENCE_ID, st_sequence_ref.pointer())?;
 
-        // Drop the sequence from in-memory tables.
-        let sequence = self
-            .sequence_state_lock
-            .remove(sequence_id)
-            .expect("there should be a sequence in the committed state if we reach here");
         let ((tx_table, ..), (commit_table, ..)) = self.get_or_create_insert_table_mut(table_id)?;
         // This likely will do a clone-write as over time?
         // The schema might have found other referents.
         let schema = commit_table
             .with_mut_schema_and_clone(tx_table, |s| s.remove_sequence(sequence_id))
             .expect("there should be a schema in the committed state if we reach here");
-        self.push_schema_change(PendingSchemaChange::SequenceRemoved(table_id, sequence, schema));
+        self.push_schema_change(PendingSchemaChange::SequenceRemoved(table_id, schema));
 
         Ok(())
     }
@@ -1870,6 +1868,67 @@ impl MutTxId {
                 iter.next()
                     .map(|row| row.read_col(StSequenceFields::SequenceId).unwrap())
             })
+    }
+
+    /// Advance every sequence whose persisted cursor does not exceed the
+    /// largest value already stored in its column to `max + 1`.
+    ///
+    /// Databases written before sequence state became transactional can hold
+    /// cursors behind their stored values, because a rolled-back transaction
+    /// could hand out values from a block whose `st_sequence` update it discarded.
+    pub fn advance_sequences_past_column_max(&mut self) -> Result<Vec<SequenceCursorRepair>> {
+        let sequences = self
+            .iter(ST_SEQUENCE_ID)?
+            .map(|row_ref| -> Result<_> { Ok((row_ref.pointer(), StSequenceRow::try_from(row_ref)?)) })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut repairs = Vec::new();
+        for (row_ptr, sequence) in sequences {
+            let Some(column_max) = self.sequence_column_max(&sequence)? else {
+                continue;
+            };
+            if sequence.allocated > column_max {
+                continue;
+            }
+            let repaired_allocated = column_max
+                .checked_add(SequenceSchema::INCREMENT)
+                .ok_or(SequenceError::Overflow(column_max))?;
+            let repaired_row = StSequenceRow {
+                allocated: repaired_allocated,
+                ..sequence.clone()
+            };
+            self.delete(ST_SEQUENCE_ID, row_ptr)?;
+            // `GENERATE = false`: system sequence ids may be 0, which would otherwise trigger autoinc.
+            with_sys_table_buf(|buf| -> Result<()> {
+                to_writer(buf, &repaired_row).map_err(anyhow::Error::from)?;
+                self.insert::<false>(ST_SEQUENCE_ID, buf)?;
+                Ok(())
+            })?;
+            repairs.push(SequenceCursorRepair {
+                sequence_name: sequence.sequence_name,
+                table_id: sequence.table_id,
+                previous_allocated: sequence.allocated,
+                repaired_allocated,
+            });
+        }
+        Ok(repairs)
+    }
+
+    /// The largest value stored in the column backing `sequence`, if the table has rows.
+    fn sequence_column_max(&self, sequence: &StSequenceRow) -> Result<Option<i128>> {
+        // Tables without any committed or inserted rows may have no in-memory table yet.
+        if self.table_row_count(sequence.table_id).unwrap_or(0) == 0 {
+            return Ok(None);
+        }
+        let mut column_max: Option<i128> = None;
+        for row in self.iter(sequence.table_id)? {
+            let value = row
+                .read_col::<AlgebraicValue>(sequence.col_pos)?
+                .to_i128_lossy()
+                .ok_or(SequenceError::NonIntegerColumn(sequence.sequence_id))?;
+            column_max = Some(column_max.map_or(value, |max| max.max(value)));
+        }
+        Ok(column_max)
     }
 
     /// Create a constraint.
@@ -2214,9 +2273,7 @@ impl MutTxId {
     /// - [`TxMetrics`], various measurements of the work performed by this transaction.
     /// - `ReducerName`, the name of the reducer which ran during this transaction.
     pub fn rollback(mut self) -> (TxOffset, TxMetrics, Option<ReducerName>) {
-        let offset = self
-            .committed_state_write_lock
-            .rollback(&mut self.sequence_state_lock, self.tx_state);
+        let offset = self.committed_state_write_lock.rollback(self.tx_state);
 
         // Compute and keep enough info that we can
         // record metrics after the transaction has ended
@@ -2243,8 +2300,7 @@ impl MutTxId {
     /// - [`TxMetrics`], various measurements of the work performed by this transaction.
     /// - [`TxId`], a read-only transaction with a shared lock on the committed state.
     pub fn rollback_downgrade(mut self, workload: Workload) -> (TxMetrics, TxId) {
-        self.committed_state_write_lock
-            .rollback(&mut self.sequence_state_lock, self.tx_state);
+        self.committed_state_write_lock.rollback(self.tx_state);
 
         // Compute and keep enough info that we can
         // record metrics after the transaction has ended
@@ -2820,13 +2876,7 @@ impl MutTxId {
         table_id: TableId,
         row: &[u8],
     ) -> Result<(ColList, RowRefInsertion<'_>, InsertFlags)> {
-        insert::<GENERATE>(
-            &mut self.tx_state,
-            &self.committed_state_write_lock,
-            &mut self.sequence_state_lock,
-            table_id,
-            row,
-        )
+        insert::<GENERATE>(&mut self.tx_state, &mut self.committed_state_write_lock, table_id, row)
     }
 }
 
@@ -2849,8 +2899,7 @@ impl MutTxId {
 /// - The "commit table for insertion" for further processing.
 fn insert_physically_maybe_generate<'a, const GENERATE: bool>(
     tx_state: &'a mut TxState,
-    committed_state: &'a CommittedState,
-    seq_state: &mut SequencesState,
+    committed_state: &'a mut CommittedState,
     table_id: TableId,
     row: &[u8],
 ) -> Result<(
@@ -2860,12 +2909,11 @@ fn insert_physically_maybe_generate<'a, const GENERATE: bool>(
     TxTableForInsertion<'a>,
     CommitTableForInsertion<'a>,
 )> {
-    // Get commit table and friends.
-    let commit_parts = committed_state.get_table_and_blob_store(table_id)?;
-    let (commit_table, ..) = commit_parts;
-
     // Get the insert table, so we can write the row into it.
-    let (tx_table, tx_blob_store, _) = tx_state.get_table_and_blob_store_or_create_from(table_id, commit_table);
+    let (tx_table, tx_blob_store, _) = {
+        let (commit_table, ..) = committed_state.get_table_and_blob_store(table_id)?;
+        tx_state.get_table_and_blob_store_or_create_from(table_id, commit_table)
+    };
 
     // 1. Insert the physical row.
     let page_pool = &committed_state.page_pool;
@@ -2880,12 +2928,7 @@ fn insert_physically_maybe_generate<'a, const GENERATE: bool>(
         // Generate a value for every column in the row that needs it.
         let mut seq_vals: SmallVec<[i128; 1]> = <_>::default();
         for sequence_id in seqs_to_use {
-            seq_vals.push(get_next_sequence_value(
-                tx_state,
-                committed_state,
-                seq_state,
-                sequence_id,
-            )?);
+            seq_vals.push(get_next_sequence_value(tx_state, committed_state, sequence_id)?);
         }
 
         // Write the generated values to the physical row at `tx_row_ptr`.
@@ -2908,6 +2951,7 @@ fn insert_physically_maybe_generate<'a, const GENERATE: bool>(
         (tx_parts, ColList::empty())
     };
 
+    let commit_parts = committed_state.get_table_and_blob_store(table_id)?;
     Ok((tx_row_ptr, gen_cols, blob_bytes, tx_parts, commit_parts))
 }
 
@@ -2928,8 +2972,7 @@ fn insert_physically_maybe_generate<'a, const GENERATE: bool>(
 /// - any insert flags.
 pub(super) fn insert<'a, const GENERATE: bool>(
     tx_state: &'a mut TxState,
-    committed_state: &'a CommittedState,
-    seq_state: &mut SequencesState,
+    committed_state: &'a mut CommittedState,
     table_id: TableId,
     row: &[u8],
 ) -> Result<(ColList, RowRefInsertion<'a>, InsertFlags)> {
@@ -2939,7 +2982,7 @@ pub(super) fn insert<'a, const GENERATE: bool>(
         blob_bytes,
         (tx_table, tx_blob_store, delete_table),
         (commit_table, commit_blob_store, _),
-    ) = insert_physically_maybe_generate::<GENERATE>(tx_state, committed_state, seq_state, table_id, row)?;
+    ) = insert_physically_maybe_generate::<GENERATE>(tx_state, committed_state, table_id, row)?;
 
     let insert_flags = InsertFlags {
         is_scheduler_table: tx_table.is_scheduler(),
@@ -3081,8 +3124,7 @@ impl MutTxId {
             (commit_table, commit_blob_store, _),
         ) = insert_physically_maybe_generate::<true>(
             &mut self.tx_state,
-            &self.committed_state_write_lock,
-            &mut self.sequence_state_lock,
+            &mut self.committed_state_write_lock,
             table_id,
             row,
         )?;

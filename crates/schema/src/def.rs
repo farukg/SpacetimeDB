@@ -32,10 +32,10 @@ use spacetimedb_data_structures::error_stream::{CollectAllErrors, CombineErrors,
 use spacetimedb_data_structures::map::{Equivalent, HashMap};
 use spacetimedb_lib::db::raw_def;
 use spacetimedb_lib::db::raw_def::v10::{
-    ExplicitNames, MethodOrAny, RawConstraintDefV10, RawHttpHandlerDefV10, RawHttpRouteDefV10, RawIndexDefV10,
-    RawLifeCycleReducerDefV10, RawModuleDefV10, RawModuleDefV10Section, RawProcedureDefV10, RawReducerDefV10,
-    RawRowLevelSecurityDefV10, RawScheduleDefV10, RawScopedTypeNameV10, RawSequenceDefV10, RawTableDefV10,
-    RawTypeDefV10, RawViewDefV10, RawViewPrimaryKeyDefV10,
+    CaseConversionPolicy, ExplicitNames, MethodOrAny, RawConstraintDefV10, RawHttpHandlerDefV10, RawHttpRouteDefV10,
+    RawIndexDefV10, RawLifeCycleReducerDefV10, RawModuleDefV10, RawModuleDefV10Section, RawProcedureDefV10,
+    RawReducerDefV10, RawRowLevelSecurityDefV10, RawScheduleDefV10, RawScopedTypeNameV10, RawSequenceDefV10,
+    RawTableDefV10, RawTypeDefV10, RawViewDefV10, RawViewPrimaryKeyDefV10,
 };
 use spacetimedb_lib::db::raw_def::v9::{
     Lifecycle, RawColumnDefaultValueV9, RawConstraintDataV9, RawConstraintDefV9, RawIndexAlgorithm, RawIndexDefV9,
@@ -571,6 +571,8 @@ impl From<ModuleDef> for RawModuleDefV10 {
         let mut explicit_names = ExplicitNames::default();
 
         sections.push(RawModuleDefV10Section::Typespace(typespace));
+        // ModuleDef names are already canonical; do not normalize them again on import.
+        sections.push(RawModuleDefV10Section::CaseConversionPolicy(CaseConversionPolicy::None));
 
         // Extract lifecycle reducer names before consuming reducers.
         let raw_lifecycle: Vec<RawLifeCycleReducerDefV10> = lifecycle_reducers
@@ -646,25 +648,51 @@ impl From<ModuleDef> for RawModuleDefV10 {
             sections.push(RawModuleDefV10Section::Procedures(raw_procedures));
         }
 
+        let mut routes_by_handler: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for (ordinal, route) in http_routes.into_iter().enumerate() {
+            let HttpRouteDef {
+                handler_name,
+                method,
+                path,
+            } = route;
+            routes_by_handler
+                .entry(handler_name)
+                .or_default()
+                .push((ordinal, method, path));
+        }
+        let mut raw_http_routes = Vec::new();
         let raw_http_handlers: Vec<RawHttpHandlerDefV10> = http_handlers
             .into_values()
-            .map(|hd| RawHttpHandlerDefV10 {
-                source_name: hd.accessor_name.into(),
+            .map(|hd| {
+                // Validated route groups belong to handlers; unused handlers have no group.
+                if let Some(routes) = routes_by_handler.remove(&hd.name) {
+                    raw_http_routes.extend(routes.into_iter().map(|(ordinal, method, path)| {
+                        (
+                            ordinal,
+                            RawHttpRouteDefV10 {
+                                handler_function: hd.accessor_name.clone().into(),
+                                method,
+                                path: RawIdentifier::new(path.as_ref()),
+                            },
+                        )
+                    }));
+                }
+                explicit_names.insert_function(
+                    RawIdentifier::from(hd.accessor_name.clone()),
+                    RawIdentifier::from(hd.name.clone()),
+                );
+                RawHttpHandlerDefV10 {
+                    source_name: hd.accessor_name.into(),
+                }
             })
             .collect();
         if !raw_http_handlers.is_empty() {
             sections.push(RawModuleDefV10Section::HttpHandlers(raw_http_handlers));
         }
 
-        if !http_routes.is_empty() {
-            let raw_http_routes: Vec<RawHttpRouteDefV10> = http_routes
-                .into_iter()
-                .map(|route| RawHttpRouteDefV10 {
-                    handler_function: route.handler_name.into(),
-                    method: route.method,
-                    path: RawIdentifier::new(route.path.as_ref()),
-                })
-                .collect();
+        raw_http_routes.sort_unstable_by_key(|(ordinal, _)| *ordinal);
+        let raw_http_routes = raw_http_routes.into_iter().map(|(_, route)| route).collect::<Vec<_>>();
+        if !raw_http_routes.is_empty() {
             sections.push(RawModuleDefV10Section::HttpRoutes(raw_http_routes));
         }
 
@@ -916,6 +944,15 @@ impl From<ViewDef> for TableDef {
 }
 
 /// A sequence definition for a database table column.
+///
+/// Previous versions of this definition exposed options `start`, `min_value`, `max_value` and `increment`.
+/// SpacetimeDB never exercised these options in any useful way,
+/// and supporting them caused considerable implementation burden,
+/// so we chose to remove them.
+/// All sequences start at some arbitrary nonnegative value near zero,
+/// have the range of the non-negative `i128`s,
+/// and increment by 1.
+/// Raw defs still have these values, but we reject any def that uses values other than the defaults.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SequenceDef {
     /// The name of the sequence. Must be unique within the containing `ModuleDef`.
@@ -926,22 +963,11 @@ pub struct SequenceDef {
     /// The column must have integral type.
     /// This must be the unique `RawSequenceDef` for this column.
     pub column: ColId,
+}
 
-    /// The value to start assigning to this column.
-    /// Will be incremented by 1 for each new row.
-    /// If not present, an arbitrary start point may be selected.
-    pub start: Option<i128>,
-
-    /// The minimum allowed value in this column.
-    /// If not present, no minimum.
-    pub min_value: Option<i128>,
-
-    /// The maximum allowed value in this column.
-    /// If not present, no maximum.
-    pub max_value: Option<i128>,
-
-    /// The increment to use when updating the sequence.
-    pub increment: i128,
+impl SequenceDef {
+    /// All sequences increment by 1.
+    pub const INCREMENT: i128 = 1;
 }
 
 impl From<SequenceDef> for RawSequenceDefV9 {
@@ -949,10 +975,10 @@ impl From<SequenceDef> for RawSequenceDefV9 {
         RawSequenceDefV9 {
             name: Some(val.name),
             column: val.column,
-            start: val.start,
-            min_value: val.min_value,
-            max_value: val.max_value,
-            increment: val.increment,
+            start: None,
+            min_value: None,
+            max_value: None,
+            increment: SequenceDef::INCREMENT,
         }
     }
 }
@@ -962,10 +988,10 @@ impl From<SequenceDef> for RawSequenceDefV10 {
         RawSequenceDefV10 {
             source_name: Some(val.name),
             column: val.column,
-            start: val.start,
-            min_value: val.min_value,
-            max_value: val.max_value,
-            increment: val.increment,
+            start: None,
+            min_value: None,
+            max_value: None,
+            increment: SequenceDef::INCREMENT,
         }
     }
 }

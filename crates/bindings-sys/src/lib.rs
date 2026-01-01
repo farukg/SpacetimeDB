@@ -883,6 +883,20 @@ pub mod raw {
         pub fn datastore_clear(table_id: TableId, out: *mut u64) -> u16;
     }
 
+    #[link(wasm_import_module = "spacetime_10.6")]
+    unsafe extern "C" {
+        /// Mandatory-policy HTTP. Uses `RequestWithPolicy` and returns `HttpPolicyError`
+        /// in `out[0]` with HTTP_ERROR. Pointer and output rules match the 10.3 import.
+        /// Hosts without ABI 10.6 reject the module before instantiation.
+        pub fn procedure_http_request_with_policy(
+            request_ptr: *const u8,
+            request_len: u32,
+            body_ptr: *const u8,
+            body_len: u32,
+            out: *mut [BytesSource; 2],
+        ) -> u16;
+    }
+
     /// What strategy does the database index use?
     ///
     /// See also: <https://www.postgresql.org/docs/current/sql-createindex.html>
@@ -1635,17 +1649,13 @@ pub mod procedure {
         http_request_bsatn: &[u8],
         body: &[u8],
     ) -> Result<(raw::BytesSource, raw::BytesSource), raw::BytesSource> {
-        let mut out = [raw::BytesSource::INVALID; 2];
-
-        let res = unsafe {
-            super::raw::procedure_http_request(
-                http_request_bsatn.as_ptr(),
-                http_request_bsatn.len() as u32,
-                body.as_ptr(),
-                body.len() as u32,
-                &mut out as *mut [raw::BytesSource; 2],
-            )
-        };
+        let (res, out) = invoke_http_request(
+            super::raw::procedure_http_request,
+            http_request_bsatn,
+            body,
+            http_request_bsatn.len() as u32,
+            body.len() as u32,
+        );
 
         match super::Errno::from_code(res) {
             // Success: `out` is a `spacetimedb_lib::http::Response`.
@@ -1654,5 +1664,55 @@ pub mod procedure {
             Some(errno) if errno == super::Errno::HTTP_ERROR => Err(out[0]),
             Some(errno) => panic!("{errno}"),
         }
+    }
+
+    /// Failures at the mandatory-policy ABI boundary.
+    pub enum HttpPolicyCallError {
+        Host(raw::BytesSource),
+        Errno(super::Errno),
+        InputTooLarge,
+    }
+
+    /// Invoke ABI 10.6 without falling back to legacy HTTP.
+    pub fn http_request_with_policy(
+        request: &[u8],
+        body: &[u8],
+    ) -> Result<(raw::BytesSource, raw::BytesSource), HttpPolicyCallError> {
+        let request_len = u32::try_from(request.len()).map_err(|_| HttpPolicyCallError::InputTooLarge)?;
+        let body_len = u32::try_from(body.len()).map_err(|_| HttpPolicyCallError::InputTooLarge)?;
+        let (res, out) = invoke_http_request(
+            super::raw::procedure_http_request_with_policy,
+            request,
+            body,
+            request_len,
+            body_len,
+        );
+        match super::Errno::from_code(res) {
+            None => Ok((out[0], out[1])),
+            Some(errno) if errno == super::Errno::HTTP_ERROR => Err(HttpPolicyCallError::Host(out[0])),
+            Some(errno) => Err(HttpPolicyCallError::Errno(errno)),
+        }
+    }
+
+    fn invoke_http_request(
+        call: unsafe extern "C" fn(*const u8, u32, *const u8, u32, *mut [raw::BytesSource; 2]) -> u16,
+        request: &[u8],
+        body: &[u8],
+        request_len: u32,
+        body_len: u32,
+    ) -> (u16, [raw::BytesSource; 2]) {
+        let mut out = [raw::BytesSource::INVALID; 2];
+        // SAFETY: Slices remain live for the call; out is writable and holds two sources.
+        // The legacy caller preserves its existing length conversion; the 10.6 caller checks lengths.
+        let res = unsafe {
+            call(
+                request.as_ptr(),
+                request_len,
+                body.as_ptr(),
+                body_len,
+                &mut out as *mut [raw::BytesSource; 2],
+            )
+        };
+        (res, out)
     }
 }

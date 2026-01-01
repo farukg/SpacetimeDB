@@ -55,7 +55,7 @@ impl WasmtimeModule {
         WasmtimeModule { module }
     }
 
-    pub const IMPLEMENTED_ABI: abi::VersionTuple = abi::VersionTuple::new(10, 5);
+    pub const IMPLEMENTED_ABI: abi::VersionTuple = abi::VersionTuple::new(10, 6);
 
     pub(super) fn link_imports(linker: &mut Linker<WasmInstanceEnv>) -> anyhow::Result<()> {
         link_imports(linker, AsyncImportMode::SyncStub)
@@ -71,6 +71,24 @@ impl WasmtimeAsyncModule {
         link_imports(linker, AsyncImportMode::Async)
     }
 }
+
+pub(super) fn instantiate_pre_checked<T: 'static>(
+    linker: &Linker<T>,
+    module: &wasmtime::Module,
+    implemented: abi::VersionTuple,
+) -> anyhow::Result<InstancePre<T>> {
+    let imports = module
+        .imports()
+        .filter(|import| matches!(import.ty(), ExternType::Func(_)));
+    let required = abi::determine_spacetime_abi(imports, |import| import.module())?;
+    abi::verify_supported(implemented, required)?;
+    Ok(linker
+        .instantiate_pre(module)
+        .map_err(InitializationError::Instantiation)?)
+}
+
+#[cfg(test)]
+mod http_policy_tests;
 
 #[derive(Copy, Clone)]
 enum AsyncImportMode {
@@ -118,7 +136,7 @@ fn link_sync_stub_for_async_function(
         "procedure_sleep_until" => {
             linker.func_wrap(module, name, procedure_sleep_until_sync_stub)?;
         }
-        "procedure_http_request" => {
+        "procedure_http_request" | "procedure_http_request_with_policy" => {
             linker.func_wrap(module, name, procedure_http_request_sync_stub)?;
         }
         _ => anyhow::bail!("missing sync Wasmtime stub for async ABI import `{module}::{name}`"),

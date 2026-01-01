@@ -36,6 +36,9 @@ pub type Request<T = Body> = http::Request<T>;
 
 pub type Response<T = Body> = http::Response<T>;
 
+mod policy;
+pub use spacetimedb_lib::http::{HttpPolicyError, HttpRequestPolicy, MAX_EXACT_ORIGIN_RESPONSE_BYTES};
+
 /// Define an HTTP handler, a special database function which handles HTTP requests.
 ///
 /// HTTP handlers must be functions of two arguments, [`&mut HandlerContext`](HandlerContext) and [`Request`],
@@ -434,8 +437,9 @@ impl HttpClient {
     ///
     /// Include a [`Timeout`] in the [`Request::extensions`] via [`http::request::Builder::extension`]
     /// to impose a timeout on the request.
-    /// All HTTP requests in SpacetimeDB are subject to a maximum timeout of 500 milliseconds.
-    /// All other extensions in `request` are ignored.
+    /// The host defaults to 30 seconds and clamps requested timeouts to at most 180 seconds.
+    /// All other extensions in `request` are ignored; use [`Self::send_with_policy`] for
+    /// mandatory exact-origin transport restrictions.
     ///
     /// The returned [`Response`] may have a status code other than 200 OK.
     /// Callers should inspect [`Response::status`] to handle errors returned from the remote server.
