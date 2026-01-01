@@ -437,7 +437,7 @@ impl DatabaseCores {
     /// Construct a [`JobCores`] manager suitable for running database WASM code on.
     ///
     /// ```rust
-    /// # use spacetimedb::startup::pin_threads;
+    /// # use spacetimedb_core::startup::pin_threads;
     /// let cores = pin_threads();
     /// let database_cores = cores.databases.make_database_runners();
     /// ```

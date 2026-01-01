@@ -27,15 +27,15 @@ use http::StatusCode;
 use http_body_util::BodyExt;
 use log::{info, warn};
 use serde::Deserialize;
-use spacetimedb::auth::identity::ConnectionAuthCtx;
-use spacetimedb::database_logger::DatabaseLogger;
-use spacetimedb::host::module_host::{ClientConnectedError, DurabilityExited};
-use spacetimedb::host::{CallResult, UpdateDatabaseResult};
-use spacetimedb::host::{FunctionArgs, MigratePlanResult};
-use spacetimedb::host::{ModuleHost, ReducerOutcome};
-use spacetimedb::host::{ProcedureCallError, ReducerCallError};
-use spacetimedb::identity::Identity;
-use spacetimedb::messages::control_db::{Database, HostType};
+use spacetimedb_core::auth::identity::ConnectionAuthCtx;
+use spacetimedb_core::database_logger::DatabaseLogger;
+use spacetimedb_core::host::module_host::{ClientConnectedError, DurabilityExited};
+use spacetimedb_core::host::{CallResult, UpdateDatabaseResult};
+use spacetimedb_core::host::{FunctionArgs, MigratePlanResult};
+use spacetimedb_core::host::{ModuleHost, ReducerOutcome};
+use spacetimedb_core::host::{ProcedureCallError, ReducerCallError};
+use spacetimedb_core::identity::Identity;
+use spacetimedb_core::messages::control_db::{Database, HostType};
 use spacetimedb_client_api_messages::http::SqlStmtResult;
 use spacetimedb_client_api_messages::name::{
     self, DatabaseName, DomainName, MigrationPolicy, PrePublishAutoMigrateResult, PrePublishManualMigrateResult,
@@ -296,13 +296,13 @@ async fn handle_http_route_impl<S: ControlStateDelegate + NodeDelegate>(
 
     let response = match module.call_http_handler(handler_id, request, body).await {
         Ok(response) => response,
-        Err(spacetimedb::host::module_host::HttpHandlerCallError::NoSuchHandler) => {
+        Err(spacetimedb_core::host::module_host::HttpHandlerCallError::NoSuchHandler) => {
             return Ok((StatusCode::NOT_FOUND, NO_SUCH_ROUTE).into_response());
         }
-        Err(spacetimedb::host::module_host::HttpHandlerCallError::NoSuchModule(_)) => {
+        Err(spacetimedb_core::host::module_host::HttpHandlerCallError::NoSuchModule(_)) => {
             return Err(NO_SUCH_DATABASE.into());
         }
-        Err(spacetimedb::host::module_host::HttpHandlerCallError::InternalError(err)) => {
+        Err(spacetimedb_core::host::module_host::HttpHandlerCallError::InternalError(err)) => {
             return Err((StatusCode::INTERNAL_SERVER_ERROR, err).into());
         }
     };
@@ -1598,12 +1598,12 @@ mod tests {
     use async_trait::async_trait;
     use axum::body::Body;
     use http::Request;
-    use spacetimedb::auth::identity::{JwtError, JwtErrorKind, SpacetimeIdentityClaims};
-    use spacetimedb::auth::token_validation::{TokenSigner, TokenValidationError, TokenValidator};
-    use spacetimedb::client::ClientActorIndex;
-    use spacetimedb::energy::{EnergyBalance, EnergyQuanta};
-    use spacetimedb::identity::AuthCtx;
-    use spacetimedb::messages::control_db::{Database, Node, Replica};
+    use spacetimedb_core::auth::identity::{JwtError, JwtErrorKind, SpacetimeIdentityClaims};
+    use spacetimedb_core::auth::token_validation::{TokenSigner, TokenValidationError, TokenValidator};
+    use spacetimedb_core::client::ClientActorIndex;
+    use spacetimedb_core::energy::{EnergyBalance, EnergyQuanta};
+    use spacetimedb_core::identity::AuthCtx;
+    use spacetimedb_core::messages::control_db::{Database, Node, Replica};
     use spacetimedb_client_api_messages::name::{
         DomainName, InsertDomainResult, RegisterTldResult, SetDomainsResult, Tld,
     };

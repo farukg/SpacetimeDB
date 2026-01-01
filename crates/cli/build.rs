@@ -6,6 +6,13 @@ use std::process::Command;
 use toml::Value;
 
 fn main() {
+    // Force build.rs re-run when SPACETIMEDB_CI_BUILD flips (e.g. first build
+    // after fork adopted the CI stub). Without this, cargo's mtime-fingerprint
+    // would skip build.rs on mtime-stable builds, leaving a stale cached
+    // embedded_templates.rs in OUT_DIR that still has include_str!() refs to
+    // the (non-existent in CI) crates/cli/.templates/ → 453 compile errors.
+    println!("cargo:rerun-if-env-changed=SPACETIMEDB_CI_BUILD");
+
     let git_hash = find_git_hash();
     println!("cargo:rustc-env=GIT_HASH={git_hash}");
 
@@ -58,11 +65,23 @@ fn get_manifest_dir() -> PathBuf {
 //                            templates list at templates/templates-list.json
 //   * `get_skill` - returns the content of a skill file by name
 fn generate_template_files() {
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let dest_path = Path::new(&out_dir).join("embedded_templates.rs");
+
+    // CI builds (container-cargo-build.sh sets SPACETIMEDB_CI_BUILD=1) don't
+    // need template embedding: `spacetime init` is a runtime user-facing
+    // feature, not used during artifact production. Skipping avoids the
+    // `crates/cli/.templates/` ephemeral copy step that breaks mtime-stable
+    // builds (the copy lives outside target/, so cargo's fingerprint-skip
+    // leaves it stale → include_str! compile failure on next build).
+    if std::env::var("SPACETIMEDB_CI_BUILD").ok().as_deref() == Some("1") {
+        std::fs::write(&dest_path, "use spacetimedb_data_structures::map::HashMap;\n\npub fn get_templates_json() -> &'static str { \"\" }\n\npub fn get_template_files() -> HashMap<&'static str, HashMap<&'static str, &'static str>> { HashMap::new() }\n\npub fn get_skill(_name: &str) -> Option<&'static str> { None }\n\npub fn get_workspace_edition() -> &'static str { \"2021\" }\n\npub fn get_workspace_dependency_version(_name: &str) -> Option<&'static str> { None }\n\npub fn get_typescript_bindings_version() -> &'static str { \"0.0.0-ci\" }\n").expect("Failed to write CI stub embedded_templates.rs");
+        return;
+    }
+
     let manifest_dir = get_manifest_dir();
     let repo_root = get_repo_root();
     let templates_dir = repo_root.join("templates");
-    let out_dir = std::env::var("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("embedded_templates.rs");
 
     println!("cargo:rerun-if-changed=../../templates");
 

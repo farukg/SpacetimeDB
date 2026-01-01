@@ -22,20 +22,20 @@ use http::{HeaderValue, StatusCode};
 use prometheus::{Histogram, IntGauge};
 use scopeguard::{defer, ScopeGuard};
 use serde::Deserialize;
-use spacetimedb::client::messages::{
+use spacetimedb_core::client::messages::{
     serialize, serialize_v3, IdentityTokenMessage, InUseSerializeBuffer, SerializeBuffer, SwitchedServerMessage,
     ToProtocol,
 };
-use spacetimedb::client::{
+use spacetimedb_core::client::{
     ClientActorId, ClientConfig, ClientConnection, ClientConnectionReceiver, DataMessage, MessageExecutionError,
     MessageHandleError, MeteredReceiver, MeteredSender, OutboundMessage, Protocol, WsVersion,
 };
-use spacetimedb::host::module_host::ClientConnectedError;
-use spacetimedb::host::NoSuchModule;
-use spacetimedb::subscription::row_list_builder_pool::BsatnRowListBuilderPool;
-use spacetimedb::util::spawn_rayon;
-use spacetimedb::worker_metrics::WORKER_METRICS;
-use spacetimedb::Identity;
+use spacetimedb_core::host::module_host::ClientConnectedError;
+use spacetimedb_core::host::NoSuchModule;
+use spacetimedb_core::subscription::row_list_builder_pool::BsatnRowListBuilderPool;
+use spacetimedb_core::util::spawn_rayon;
+use spacetimedb_core::worker_metrics::WORKER_METRICS;
+use spacetimedb_core::Identity;
 use spacetimedb_client_api_messages::websocket::v1 as ws_v1;
 use spacetimedb_client_api_messages::websocket::v2 as ws_v2;
 use spacetimedb_client_api_messages::websocket::v3 as ws_v3;
@@ -1919,7 +1919,7 @@ mod tests {
     };
     use pretty_assertions::assert_matches;
     use proptest::prelude::*;
-    use spacetimedb::client::{messages::SerializableMessage, ClientName, OutboundMessage};
+    use spacetimedb_core::client::{messages::SerializableMessage, ClientName, OutboundMessage};
     use tokio::time::sleep;
 
     use super::*;
@@ -2179,7 +2179,8 @@ mod tests {
             Either::Right(OutboundMessage::V1(SerializableMessage::Identity(
                 IdentityTokenMessage {
                     identity: Identity::ZERO,
-                    token: "macaron".into(),
+                    // SIG-PATCH: remove when upstream fixes.
+                    token: std::env::var("STDB_SUBSCRIBE_TOKEN").unwrap_or_else(|_| "macaron".into()).into(),
                     connection_id: ConnectionId::ZERO,
                 },
             ))),
@@ -2228,7 +2229,8 @@ mod tests {
             Either::Right(OutboundMessage::V1(SerializableMessage::Identity(
                 IdentityTokenMessage {
                     identity: Identity::ZERO,
-                    token: "macaron".into(),
+                    // SIG-PATCH: remove when upstream fixes.
+                    token: std::env::var("STDB_SUBSCRIBE_TOKEN").unwrap_or_else(|_| "macaron".into()).into(),
                     connection_id: ConnectionId::ZERO,
                 },
             ))),

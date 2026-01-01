@@ -9,6 +9,7 @@ use spacetimedb_primitives::{ColSet, TableId};
 use spacetimedb_schema::auto_migrate::{AutoMigratePlan, ManualMigratePlan, MigratePlan};
 use spacetimedb_schema::def::{TableDef, ViewDef};
 use spacetimedb_schema::schema::{column_schemas_from_defs, IndexSchema, Schema, SequenceSchema, TableSchema};
+use std::collections::HashMap;
 
 /// The logger used for by [`update_database`] and friends.
 pub trait UpdateLogger {
@@ -99,6 +100,11 @@ fn auto_migrate_database(
     // Schema should be queries only when needed to ensure that any schema changes made during earlier migration steps are visible
     // to later steps.
 
+    // Sequences added to columns that already contain values adopt
+    // `max(existing) + 1` as their start (setval semantics). Computed during
+    // prechecks, consumed by the `AddSequence` step.
+    let mut adopted_sequence_starts: HashMap<String, i128> = HashMap::new();
+
     for precheck in plan.prechecks {
         match precheck {
             spacetimedb_schema::auto_migrate::AutoMigratePrecheck::CheckAddSequenceRangeValid(sequence_name) => {
@@ -106,31 +112,26 @@ fn auto_migrate_database(
                 let sequence_def = &table_def.sequences[sequence_name];
                 let table_id = stdb.table_id_from_name_mut(tx, &table_def.name)?.unwrap();
 
-                let ty = table_def
-                    .get_column(sequence_def.column)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("Precheck failed: added sequence {sequence_name} refers to unknown column")
-                    })?
-                    .ty
-                    .clone();
-
-                // Convert `SequenceDef` min/max to `AlgebraicValue`s of the correct type.
-                let min = AlgebraicValue::from_i128(&ty, sequence_def.min_value.unwrap_or(1)).ok_or_else(|| {
-                    anyhow::anyhow!("Precheck failed: added sequence {sequence_name} has invalid min value")
+                table_def.get_column(sequence_def.column).ok_or_else(|| {
+                    anyhow::anyhow!("Precheck failed: added sequence {sequence_name} refers to unknown column")
                 })?;
 
-                let max =
-                    AlgebraicValue::from_i128(&ty, sequence_def.max_value.unwrap_or(i128::MAX)).ok_or_else(|| {
-                        anyhow::anyhow!("Precheck failed: added sequence {sequence_name} has invalid max value")
+                // NOTE: the historical range-based row scan (`from_i128(min)..from_i128(max)`)
+                // was vacuous for default sequences: `i128::MAX` truncates on narrower column
+                // types (e.g. to `-1_i64`), producing an empty range. Scan the column directly.
+                let mut max_existing: Option<i128> = None;
+                for row in stdb.iter_mut(tx, table_id)? {
+                    let value: AlgebraicValue = row.read_col(sequence_def.column)?;
+                    let value = value.to_i128_lossy().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Precheck failed: added sequence {sequence_name} column holds a non-integer value"
+                        )
                     })?;
+                    max_existing = Some(max_existing.map_or(value, |acc| acc.max(value)));
+                }
 
-                let range = min..max;
-                if stdb
-                    .iter_by_col_range_mut(tx, table_id, sequence_def.column, range)?
-                    .next()
-                    .is_some()
-                {
-                    anyhow::bail!("Precheck failed: added sequence {sequence_name} already has values in range",);
+                if let Some(max_existing) = max_existing {
+                    adopted_sequence_starts.insert(sequence_name.to_string(), max_existing + 1);
                 }
             }
         }
@@ -246,8 +247,17 @@ fn auto_migrate_database(
                     sequence_name,
                     table_def.name
                 );
-                let sequence_schema =
+                let mut sequence_schema =
                     SequenceSchema::from_module_def(plan.new, sequence_def, table_schema.table_id, 0.into());
+                if let Some(&adopted_start) = adopted_sequence_starts.get(&sequence_name.to_string()) {
+                    log!(
+                        logger,
+                        "Sequence `{}` adopts start {} from existing column values",
+                        sequence_name,
+                        adopted_start
+                    );
+                    sequence_schema.start = adopted_start;
+                }
                 stdb.create_sequence(tx, sequence_schema)?;
             }
             spacetimedb_schema::auto_migrate::AutoMigrateStep::RemoveSequence(sequence_name) => {
@@ -900,6 +910,78 @@ mod test {
                 ids.iter().last().unwrap() == &4097,
                 "expected id 4097 after reopen, got {ids:?}"
             );
+        }
+
+        Ok(())
+    }
+
+    /// Adding `#[auto_inc]` to a column of a populated table adopts
+    /// `max(existing) + 1` as the sequence start (setval semantics), so the
+    /// migration succeeds and new inserts continue after the existing ids.
+    #[test]
+    fn add_sequence_to_populated_table_adopts_max_plus_one() -> anyhow::Result<()> {
+        let auth_ctx = AuthCtx::for_testing();
+        let stdb = TestDB::durable()?;
+
+        // v1: plain unique primary key, no sequence — ids are explicit.
+        let module_v1: ModuleDef = {
+            let mut b = RawModuleDefV9Builder::new();
+            b.build_table_with_new_type("adopt_t", [("id", AlgebraicType::I64)], true)
+                .with_unique_constraint(0)
+                .with_index_no_accessor_name(btree(0))
+                .with_access(TableAccess::Public)
+                .finish();
+            b.finish().try_into().expect("valid module v1")
+        };
+
+        // v2: same table, now with an auto-inc sequence on the primary key.
+        let module_v2: ModuleDef = {
+            let mut b = RawModuleDefV9Builder::new();
+            b.build_table_with_new_type("adopt_t", [("id", AlgebraicType::I64)], true)
+                .with_auto_inc_primary_key(0)
+                .with_index_no_accessor_name(btree(0))
+                .with_access(TableAccess::Public)
+                .finish();
+            b.finish().try_into().expect("valid module v2")
+        };
+
+        // Create the v1 table and insert rows with explicit, sparse ids.
+        {
+            let mut tx = begin_mut_tx(&stdb);
+            for def in module_v1.tables() {
+                create_table_from_def(&stdb, &mut tx, &module_v1, def)?;
+            }
+            let table_id = stdb.table_id_from_name_mut(&tx, "adopt_t")?.expect("adopt_t should exist");
+            insert(&stdb, &mut tx, table_id, &product![7i64])?;
+            insert(&stdb, &mut tx, table_id, &product![69721i64])?;
+            insert(&stdb, &mut tx, table_id, &product![42i64])?;
+            stdb.commit_tx(tx)?;
+        }
+
+        // Migrate: the populated column gains a sequence; precheck must adopt, not fail.
+        {
+            let mut tx = begin_mut_tx(&stdb);
+            let plan = ponder_migrate(&module_v1, &module_v2)?;
+            let res = update_database(&stdb, &mut tx, auth_ctx, plan, &TestLogger)?;
+            assert!(matches!(
+                res,
+                UpdateResult::Success | UpdateResult::RequiresClientDisconnect
+            ));
+            stdb.commit_tx(tx)?;
+        }
+
+        // A generated insert (id = 0) continues after the existing maximum.
+        {
+            let mut tx = begin_mut_tx(&stdb);
+            let table_id = stdb.table_id_from_name_mut(&tx, "adopt_t")?.expect("adopt_t should exist");
+            insert(&stdb, &mut tx, table_id, &product![0i64])?;
+            let mut ids = stdb
+                .iter_mut(&tx, table_id)?
+                .map(|r| r.read_col::<i64>(0))
+                .collect::<Result<Vec<_>, _>>()?;
+            ids.sort();
+            stdb.commit_tx(tx)?;
+            assert_eq!(ids, vec![7, 42, 69721, 69722], "generated id must be max + 1");
         }
 
         Ok(())

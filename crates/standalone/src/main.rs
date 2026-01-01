@@ -1,7 +1,7 @@
 use clap::Command;
 
-use spacetimedb::startup;
-use spacetimedb::util::jobs::JobCores;
+use spacetimedb_core::startup;
+use spacetimedb_core::util::jobs::JobCores;
 use tokio::runtime::Builder;
 
 use spacetimedb_standalone::*;

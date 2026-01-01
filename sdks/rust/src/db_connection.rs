@@ -19,7 +19,6 @@
 //! This module is internal, and may incompatibly change without warning.
 
 use crate::{
-    Event, ReducerEvent, Status,
     __codegen::{InternalError, Reducer},
     callbacks::{
         CallbackId, DbCallbacks, ProcedureCallback, ProcedureCallbacks, ReducerCallback, ReducerCallbacks, RowCallback,
@@ -29,12 +28,13 @@ use crate::{
     spacetime_module::{AbstractEventContext, AppliedDiff, DbConnection, DbUpdate, InModule, SpacetimeModule},
     subscription::{PendingUnsubscribeResult, SubscriptionHandleImpl, SubscriptionManager},
     websocket::{WsConnection, WsParams},
+    Event, ReducerEvent, Status,
 };
 use bytes::Bytes;
 use futures::StreamExt;
 #[cfg(feature = "browser")]
 use futures::{pin_mut, FutureExt};
-use futures_channel::mpsc;
+use futures_channel::mpsc::{self};
 use http::Uri;
 use spacetimedb_client_api_messages::websocket::{self as ws, common::QuerySetId};
 use spacetimedb_lib::{bsatn, ser::Serialize, ConnectionId, Identity, Timestamp};
@@ -45,7 +45,9 @@ use std::{
     fs::File,
     io::Write,
     path::PathBuf,
+    pin::Pin,
     sync::{atomic::AtomicU32, Arc, Mutex as StdMutex, OnceLock},
+    task::{Context as TaskContext, Poll, Waker},
 };
 #[cfg(not(feature = "browser"))]
 use tokio::{
@@ -59,6 +61,21 @@ pub(crate) type SharedCell<T> = Arc<StdMutex<T>>;
 type SharedAsyncCell<T> = Arc<TokioMutex<T>>;
 #[cfg(feature = "browser")]
 type SharedAsyncCell<T> = SharedCell<T>;
+
+enum ChannelTryRecvError {
+    Empty,
+    Closed,
+}
+
+fn try_recv_unbounded<T>(recv: &mut mpsc::UnboundedReceiver<T>) -> Result<T, ChannelTryRecvError> {
+    let waker = Waker::noop();
+    let mut cx = TaskContext::from_waker(waker);
+    match Pin::new(recv).poll_next_unpin(&mut cx) {
+        Poll::Ready(Some(value)) => Ok(value),
+        Poll::Ready(None) => Err(ChannelTryRecvError::Closed),
+        Poll::Pending => Err(ChannelTryRecvError::Empty),
+    }
+}
 
 /// Implementation of `DbConnection`, `EventContext`,
 /// and anything else that provides access to the database connection.
@@ -362,7 +379,7 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
 
     /// Apply all queued [`PendingMutation`]s.
     fn apply_pending_mutations(&self) -> crate::Result<()> {
-        while let Ok(Some(pending_mutation)) = get_lock_sync(&self.pending_mutations_recv).try_next() {
+        while let Ok(pending_mutation) = try_recv_unbounded(&mut get_lock_sync(&self.pending_mutations_recv)) {
             self.apply_mutation(pending_mutation)?;
         }
 
@@ -567,21 +584,13 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
         // so that pending callbacks don't get skipped.
         self.apply_pending_mutations()?;
 
-        // Deranged behavior: mpsc's `try_next` returns `Ok(None)` when the channel is closed,
-        // and `Err(_)` when the channel is open and waiting. This seems exactly backwards.
-        //
-        // NOTE(cloutiertyler): A comment on the deranged behavior: the mental
-        // model is that of an iterator, but for a stream instead. i.e. you pull
-        // off of an iterator until it returns `None`, which means that the
-        // iterator is exhausted. If you try to pull off the iterator and
-        // there's nothing there but it's not exhausted, it (arguably sensibly)
-        // returns `Err(_)`. Similar behavior as `Iterator::next` and
-        // `Stream::poll_next`. No comment on whether this is a good mental
-        // model or not.
-        let res = match get_lock_sync(&self.recv).try_next() {
-            Ok(None) => Err(self.end_connection(None)),
-            Err(_) => Ok(false),
-            Ok(Some(msg)) => self.process_message(msg).map(|_| true),
+        // `try_recv_unbounded` returns `Ok(msg)` when a message is available,
+        // `Err(ChannelTryRecvError::Empty)` when the channel is open but no messages are ready,
+        // and `Err(ChannelTryRecvError::Closed)` when the sender has been dropped.
+        let res = match try_recv_unbounded(&mut get_lock_sync(&self.recv)) {
+            Err(ChannelTryRecvError::Closed) => Err(self.end_connection(None)),
+            Err(ChannelTryRecvError::Empty) => Ok(false),
+            Ok(msg) => self.process_message(msg).map(|_| true),
         };
 
         // Also apply any new pending messages afterwards,
@@ -605,8 +614,8 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
         // This may be unnecessary, but `tokio::select` does not document any ordering guarantees,
         // and if both `pending_mutations.next()` and `recv.next()` have values ready,
         // we want to process the pending mutation first.
-        if let Ok(pending_mutation) = pending_mutations.try_next() {
-            return Message::Local(pending_mutation.unwrap());
+        if let Ok(pending_mutation) = try_recv_unbounded(&mut pending_mutations) {
+            return Message::Local(pending_mutation);
         }
 
         #[cfg(not(feature = "browser"))]

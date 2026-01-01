@@ -15,7 +15,6 @@ pub fn cli() -> clap::Command {
 ///
 /// Run `spacetime version --help` to see all options.
 #[derive(clap::Args)]
-#[command(disable_help_flag = true)]
 struct Version {
     /// The args to pass to spacetimedb-update
     #[arg(allow_hyphen_values = true, num_args = 0..)]

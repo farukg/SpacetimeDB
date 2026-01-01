@@ -1,5 +1,5 @@
 use clap::Command as ClapCommand;
-use spacetimedb::messages::control_db::HostType;
+use spacetimedb_core::messages::control_db::HostType;
 use spacetimedb_cli::Config;
 use spacetimedb_paths::SpacetimePaths;
 use spacetimedb_schema::def::ModuleDef;
@@ -69,7 +69,7 @@ pub fn invoke_cli(paths: &SpacetimePaths, args: &[&str]) {
 fn extract_descriptions(wasm_file: &std::path::Path) -> anyhow::Result<ModuleDef> {
     tokio::task::block_in_place(|| {
         let program_bytes = std::fs::read(wasm_file)?;
-        tokio::runtime::Handle::current().block_on(spacetimedb::host::extract_schema(
+        tokio::runtime::Handle::current().block_on(spacetimedb_core::host::extract_schema(
             program_bytes.into(),
             match wasm_file.extension().unwrap().to_str().unwrap() {
                 "wasm" => HostType::Wasm,

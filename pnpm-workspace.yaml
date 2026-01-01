@@ -3,29 +3,41 @@ packages:
   - 'crates/bindings-typescript/test-app'
   - 'crates/bindings-typescript/case-conversion-test-client'
   - 'templates/chat-react-ts'
-  - 'templates/money-exchange-react-ts'
-  - 'templates/hangman-react-ts'
   - 'templates/react-ts'
   - 'templates/basic-ts'
-  - 'templates/llm-chat-ts'
   - 'templates/vue-ts'
   - 'templates/tanstack-ts'
   - 'templates/browser-ts'
   - 'templates/svelte-ts'
-  - 'templates/solid-ts'
   - 'templates/angular-ts'
   - 'templates/nuxt-ts'
   - 'templates/remix-ts'
   - 'templates/bun-ts'
-  - 'templates/keynote-2'
   - 'modules/benchmarks-ts'
   - 'modules/module-test-ts'
   - 'templates/chat-react-ts/spacetimedb'
   - 'modules/sdk-test-connect-disconnect-ts'
   - 'modules/sdk-test-procedure-ts'
-  - 'modules/sdk-test-procedural-view-pk-ts'
-  - 'modules/sdk-test-view-pk-ts'
   - 'modules/sdk-test-ts'
   - 'modules/sdk-test-case-conversion-ts'
   - 'docs'
+onlyBuiltDependencies:
+  - bun
+ignoredBuiltDependencies:
+  - '@parcel/watcher'
+  - better-sqlite3
+  - core-js
+  - core-js-pure
+  - esbuild
+  - lmdb
+  - msgpackr-extract
 minimumReleaseAge: 1440
+allowBuilds:
+  '@parcel/watcher': false
+  better-sqlite3: false
+  bun: false
+  core-js: false
+  core-js-pure: false
+  esbuild: false
+  lmdb: false
+  msgpackr-extract: false

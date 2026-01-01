@@ -3,7 +3,7 @@ use crate::{
     schemas::{table_name, BenchTable, IndexStrategy},
     ResultBench,
 };
-use spacetimedb::db::relational_db::{tests_utils::TestDB, RelationalDB};
+use spacetimedb_core::db::relational_db::{tests_utils::TestDB, RelationalDB};
 use spacetimedb_datastore::execution_context::Workload;
 use spacetimedb_primitives::{ColId, IndexId, TableId};
 use spacetimedb_sats::{bsatn, AlgebraicValue};
@@ -128,7 +128,7 @@ impl BenchDatabase for SpacetimeRaw {
             for mut row in rows {
                 // It would likely be faster to collect a vector of IDs and delete + insert them all at once,
                 // but this implementation is closer to how `update` works in modules.
-                // (update_by_{field} -> spacetimedb::query::update_by_field -> (delete_by_col_eq; insert))
+                // (update_by_{field} -> spacetimedb_core::query::update_by_field -> (delete_by_col_eq; insert))
                 let id = self
                     .db
                     .iter_by_col_eq_mut(tx, *table_id, 0, &row.elements[0])?

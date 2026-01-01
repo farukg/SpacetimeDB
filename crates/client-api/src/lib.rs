@@ -9,12 +9,12 @@ use axum::response::ErrorResponse;
 use bytes::Bytes;
 use http::StatusCode;
 
-use spacetimedb::client::ClientActorIndex;
-use spacetimedb::energy::{EnergyBalance, EnergyQuanta};
-use spacetimedb::host::{HostController, MigratePlanResult, ModuleHost, NoSuchModule, UpdateDatabaseResult};
-use spacetimedb::identity::{AuthCtx, Identity};
-use spacetimedb::messages::control_db::{Database, HostType, Node, Replica};
-use spacetimedb::sql;
+use spacetimedb_core::client::ClientActorIndex;
+use spacetimedb_core::energy::{EnergyBalance, EnergyQuanta};
+use spacetimedb_core::host::{HostController, MigratePlanResult, ModuleHost, NoSuchModule, UpdateDatabaseResult};
+use spacetimedb_core::identity::{AuthCtx, Identity};
+use spacetimedb_core::messages::control_db::{Database, HostType, Node, Replica};
+use spacetimedb_core::sql;
 use spacetimedb_client_api_messages::http::{SqlStmtResult, SqlStmtStats};
 use spacetimedb_client_api_messages::name::{DomainName, InsertDomainResult, RegisterTldResult, SetDomainsResult, Tld};
 use spacetimedb_lib::{ProductTypeElement, ProductValue};

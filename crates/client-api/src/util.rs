@@ -13,7 +13,7 @@ use futures::TryStreamExt;
 use http::{HeaderName, HeaderValue, StatusCode};
 
 use hyper::body::Body;
-use spacetimedb::Identity;
+use spacetimedb_core::Identity;
 use spacetimedb_client_api_messages::name::DatabaseName;
 
 use crate::routes::identity::IdentityForUrl;
@@ -49,7 +49,14 @@ impl headers::Header for XForwardedFor {
     fn decode<'i, I: Iterator<Item = &'i HeaderValue>>(values: &mut I) -> Result<Self, headers::Error> {
         let val = values.next().ok_or_else(headers::Error::invalid)?;
         let val = val.to_str().map_err(|_| headers::Error::invalid())?;
-        let (first, _) = val.split_once(',').ok_or_else(headers::Error::invalid)?;
+        // XFF is a comma-separated list whose first entry is the originating
+        // client. A list of length 1 has NO comma — which Traefik always
+        // emits when the app sits behind a single reverse proxy. Previous
+        // code required a comma via `split_once(',').ok_or_else(invalid)`
+        // and rejected every single-IP XFF with HTTP 400, breaking the WS
+        // subscribe endpoint post-axum-update (#2713, 2026-04-16). Accept
+        // both shapes by taking the head of the list regardless of length.
+        let first = val.split_once(',').map(|(f, _)| f).unwrap_or(val);
         let ip = first.trim().parse().map_err(|_| headers::Error::invalid())?;
         Ok(XForwardedFor(ip))
     }

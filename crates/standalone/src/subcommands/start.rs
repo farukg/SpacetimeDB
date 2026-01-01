@@ -10,12 +10,12 @@ use anyhow::Context;
 use axum::extract::DefaultBodyLimit;
 use clap::ArgAction::SetTrue;
 use clap::{Arg, ArgMatches};
-use spacetimedb::config::{parse_config, CertificateAuthority};
-use spacetimedb::db::persistence::{CommitlogConfig, DurabilityConfig};
-use spacetimedb::db::{self, Storage};
-use spacetimedb::startup::{self, TracingOptions};
-use spacetimedb::util::jobs::JobCores;
-use spacetimedb::worker_metrics;
+use spacetimedb_core::config::{parse_config, CertificateAuthority};
+use spacetimedb_core::db::persistence::{CommitlogConfig, DurabilityConfig};
+use spacetimedb_core::db::{self, Storage};
+use spacetimedb_core::startup::{self, TracingOptions};
+use spacetimedb_core::util::jobs::JobCores;
+use spacetimedb_core::worker_metrics;
 use spacetimedb_client_api::routes::database::DatabaseRoutes;
 use spacetimedb_client_api::routes::router;
 use spacetimedb_client_api::routes::subscribe::WebSocketOptions;
@@ -98,7 +98,7 @@ pub fn cli() -> clap::Command {
 #[derive(Default, serde::Deserialize)]
 struct ConfigFile {
     #[serde(flatten)]
-    common: spacetimedb::config::ConfigFile,
+    common: spacetimedb_core::config::ConfigFile,
     #[serde(default)]
     commitlog: CommitlogConfig,
     #[serde(default)]
@@ -543,7 +543,7 @@ mod tests {
 
         let config: ConfigFile = toml::from_str(toml).unwrap();
 
-        // `spacetimedb::config::ConfigFile` doesn't implement `PartialEq`,
+        // `spacetimedb_core::config::ConfigFile` doesn't implement `PartialEq`,
         // so check `common` in a pedestrian way.
         assert_eq!(&config.common.logs.directives, &["banana_shake=strawberry"]);
         assert!(config.common.certificate_authority.is_none());

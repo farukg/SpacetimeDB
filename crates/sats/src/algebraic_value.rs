@@ -330,6 +330,31 @@ impl AlgebraicValue {
         };
         Some(val)
     }
+
+    /// Projects an integer `AlgebraicValue` to an `i128`, the inverse of [`Self::from_i128`].
+    ///
+    /// Values outside the `i128` range (`U128`/`U256`/`I256` overflow) saturate lossily;
+    /// sequence-compatible column types (`≤ 64` bits) round-trip exactly.
+    /// Returns `None` if the value is not an integer.
+    pub fn to_i128_lossy(&self) -> Option<i128> {
+        Some(match self {
+            Self::I8(x) => (*x).into(),
+            Self::I16(x) => (*x).into(),
+            Self::I32(x) => (*x).into(),
+            Self::I64(x) => (*x).into(),
+            Self::I128(x) => x.0,
+            Self::I256(x) => i128::try_from(**x).unwrap_or(i128::MAX),
+
+            Self::U8(x) => (*x).into(),
+            Self::U16(x) => (*x).into(),
+            Self::U32(x) => (*x).into(),
+            Self::U64(x) => (*x).into(),
+            Self::U128(x) => i128::try_from(x.0).unwrap_or(i128::MAX),
+            Self::U256(x) => i128::try_from(**x).unwrap_or(i128::MAX),
+
+            _ => return None,
+        })
+    }
 }
 
 impl<T: Into<AlgebraicValue>> From<Option<T>> for AlgebraicValue {

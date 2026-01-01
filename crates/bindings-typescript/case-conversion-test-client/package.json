@@ -16,7 +16,7 @@
     "spacetimedb": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
+    "typescript": "^6.0.3",
     "esbuild": "^0.24.0",
     "@types/node": "^20.0.0"
   }
