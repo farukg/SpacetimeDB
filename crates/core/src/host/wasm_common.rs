@@ -452,6 +452,7 @@ macro_rules! abi_funcs {
             "spacetime_10.3"::procedure_commit_mut_tx,
             "spacetime_10.3"::procedure_sleep_until,
             "spacetime_10.3"::procedure_http_request,
+            "spacetime_10.6"::procedure_http_request_with_policy,
         }
     };
 }

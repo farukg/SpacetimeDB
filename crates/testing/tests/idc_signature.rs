@@ -1,6 +1,6 @@
 //! Signature failures are durable decisions, not transport failures. Retries must
 //! replay those decisions even when the reducer schema has changed.
-use spacetimedb::host::{FunctionArgs, IdcDeliveryFailure, IdcReducerCallOutcome};
+use spacetimedb_core::host::{FunctionArgs, IdcDeliveryFailure, IdcReducerCallOutcome};
 use spacetimedb_lib::{hash_bytes, ConnectionId, Hash, Identity};
 use spacetimedb_schema::def::reducer_signature_hash;
 use spacetimedb_testing::modules::{CompilationMode, CompiledModule, DEFAULT_CONFIG, IN_MEMORY_CONFIG};
@@ -46,7 +46,7 @@ fn concurrent_idc_deliveries_commit_once() {
 
             // add allocates a new row ID each time, so duplicate committed effects
             // would leave multiple rows even though the arguments are identical.
-            let rows = spacetimedb::sql::execute::run(
+            let rows = spacetimedb_core::sql::execute::run(
                 host.relational_db().clone(),
                 "SELECT * FROM person WHERE name = 'idc duplicate'".into(),
                 spacetimedb_lib::identity::AuthCtx::for_current(host.info.owner_identity),

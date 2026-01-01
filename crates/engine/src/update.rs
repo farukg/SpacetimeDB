@@ -20,6 +20,7 @@ use spacetimedb_schema::schema::{
     column_schemas_from_defs, ConstraintSchema, IndexSchema, Schema, SequenceSchema, TableSchema,
 };
 use spacetimedb_schema::table_name::TableName;
+use std::collections::HashMap;
 
 /// The joined, qualified name a `(namespace, name)` key refers to.
 ///
@@ -215,6 +216,8 @@ fn auto_migrate_database(
     // Schema should be queries only when needed to ensure that any schema changes made during earlier migration steps are visible
     // to later steps.
 
+    let mut adopted_sequence_starts = HashMap::new();
+
     for precheck in plan.prechecks {
         match precheck {
             spacetimedb_schema::auto_migrate::AutoMigratePrecheck::CheckAddSequenceRangeValid(key) => {
@@ -226,34 +229,30 @@ fn auto_migrate_database(
                     anyhow::anyhow!("Precheck: sequence `{sequence_name}` not found in new module def")
                 })?;
                 let table_full_name = joined(namespace, &table_def.name);
-                let table_id = stdb.table_id_from_name_mut(tx, &table_full_name)?.unwrap();
-
-                let ty = table_def
-                    .get_column(sequence_def.column)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("Precheck failed: added sequence {sequence_name} refers to unknown column")
-                    })?
-                    .ty
-                    .clone();
-
-                // Convert `SequenceSchema` min/max to `AlgebraicValue`s of the correct type.
-                let min = ty
-                    .saturating_value_from_i128(SequenceSchema::MIN_VALUE)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("Precheck failed: added sequence {sequence_name} has invalid min value")
-                    })?;
-
-                let max = ty.saturating_value_from_i128(i128::MAX).ok_or_else(|| {
-                    anyhow::anyhow!("Precheck failed: added sequence {sequence_name} has invalid max value")
+                let table_id = stdb.table_id_from_name_mut(tx, &table_full_name)?.ok_or_else(|| {
+                    anyhow::anyhow!("Precheck: table `{table_full_name}` not found")
                 })?;
 
-                let range = min..=max;
-                if stdb
-                    .iter_by_col_range_mut(tx, table_id, sequence_def.column, range)?
-                    .next()
-                    .is_some()
-                {
-                    anyhow::bail!("Precheck failed: added sequence {sequence_name} already has values in range",);
+                table_def.get_column(sequence_def.column).ok_or_else(|| {
+                    anyhow::anyhow!("Precheck failed: added sequence {sequence_name} refers to unknown column")
+                })?;
+
+                let mut max_existing = None;
+                for row in stdb.iter_mut(tx, table_id)? {
+                    let value: AlgebraicValue = row.read_col(sequence_def.column)?;
+                    let value = value.to_i128_lossy().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Precheck failed: added sequence {sequence_name} column holds a non-integer value"
+                        )
+                    })?;
+                    max_existing = Some(max_existing.map_or(value, |max: i128| max.max(value)));
+                }
+
+                if let Some(max_existing) = max_existing {
+                    let start = max_existing.checked_add(SequenceSchema::INCREMENT).ok_or(
+                        spacetimedb_datastore::error::SequenceError::Overflow(max_existing),
+                    )?;
+                    adopted_sequence_starts.insert(key, start);
                 }
             }
         }
@@ -520,6 +519,10 @@ fn auto_migrate_database(
 
                 // Apply namespace prefix for submodule sequences
                 sequence_schema.sequence_name = namespace.join_raw(&sequence_schema.sequence_name);
+                if let Some(&start) = adopted_sequence_starts.get(&key) {
+                    log!(logger, "Sequence `{}` adopts start {} from existing column values", sequence_schema.sequence_name, start);
+                    sequence_schema.start = start;
+                }
                 stdb.create_sequence(tx, sequence_schema)?;
             }
             spacetimedb_schema::auto_migrate::AutoMigrateStep::RemoveSequence(key) => {
@@ -1950,6 +1953,61 @@ mod test {
             );
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn add_sequence_to_populated_table_adopts_max_plus_one() -> anyhow::Result<()> {
+        let auth_ctx = AuthCtx::for_testing();
+        let stdb = TestDB::durable()?;
+        let module_v1: ModuleDef = {
+            let mut builder = RawModuleDefV9Builder::new();
+            builder.build_table_with_new_type("adopt_t", [("id", AlgebraicType::I64)], true)
+                .with_unique_constraint(0)
+                .with_index_no_accessor_name(btree(0))
+                .with_access(TableAccess::Public)
+                .finish();
+            builder.finish().try_into().expect("valid module v1")
+        };
+        let module_v2: ModuleDef = {
+            let mut builder = RawModuleDefV9Builder::new();
+            builder.build_table_with_new_type("adopt_t", [("id", AlgebraicType::I64)], true)
+                .with_auto_inc_primary_key(0)
+                .with_index_no_accessor_name(btree(0))
+                .with_access(TableAccess::Public)
+                .finish();
+            builder.finish().try_into().expect("valid module v2")
+        };
+
+        {
+            let mut tx = begin_mut_tx(&stdb);
+            for def in module_v1.tables() {
+                create_table_from_def(&stdb, &mut tx, &module_v1, def)?;
+            }
+            let table_id = stdb.table_id_from_name_mut(&tx, "adopt_t")?.expect("adopt_t should exist");
+            for id in [7i64, 69721, 42] {
+                insert(&stdb, &mut tx, table_id, &product![id])?;
+            }
+            stdb.commit_tx(tx)?;
+        }
+        {
+            let mut tx = begin_mut_tx(&stdb);
+            let plan = ponder_migrate(&module_v1, &module_v2)?;
+            let result = update_database(&stdb, &mut tx, auth_ctx, plan, &TestLogger)?;
+            assert!(matches!(result, UpdateResult::Success | UpdateResult::RequiresClientDisconnect));
+            stdb.commit_tx(tx)?;
+        }
+        {
+            let mut tx = begin_mut_tx(&stdb);
+            let table_id = stdb.table_id_from_name_mut(&tx, "adopt_t")?.expect("adopt_t should exist");
+            insert(&stdb, &mut tx, table_id, &product![0i64])?;
+            let mut ids = stdb.iter_mut(&tx, table_id)?
+                .map(|row| row.read_col::<i64>(0))
+                .collect::<Result<Vec<_>, _>>()?;
+            ids.sort();
+            stdb.commit_tx(tx)?;
+            assert_eq!(ids, vec![7, 42, 69721, 69722]);
+        }
         Ok(())
     }
 }

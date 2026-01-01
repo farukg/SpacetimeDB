@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{ArgMatches, CommandFactory, FromArgMatches};
-use spacetimedb::host::extract_schema;
-use spacetimedb::messages::control_db;
+use spacetimedb_core::host::extract_schema;
+use spacetimedb_core::messages::control_db;
 use spacetimedb_lib::{db::raw_def::v10::RawModuleDefV10, sats, RawModuleDef};
 
 /// Extracts the module schema from a local module file.

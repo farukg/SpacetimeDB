@@ -85,6 +85,14 @@ use spacetimedb_table::{
     table_index::{IndexCannotSeekRange, IndexKey, IndexSeekRangeResult, PointOrRange, TableIndex},
 };
 use std::{marker::PhantomData, sync::Arc, time::Duration};
+/// A sequence cursor advanced by [`MutTxId::advance_sequences_past_column_max`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SequenceCursorRepair {
+    pub sequence_name: RawNamespacedIdentifier,
+    pub table_id: TableId,
+    pub previous_allocated: i128,
+    pub repaired_allocated: i128,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ViewCallInfo {
@@ -2426,6 +2434,67 @@ impl MutTxId {
                 iter.next()
                     .map(|row| row.read_col(StSequenceFields::SequenceId).unwrap())
             })
+    }
+
+    /// Advance every sequence whose persisted cursor does not exceed the
+    /// largest value already stored in its column to `max + 1`.
+    ///
+    /// Databases written before sequence state became transactional can hold
+    /// cursors behind their stored values, because a rolled-back transaction
+    /// could hand out values from a block whose `st_sequence` update it discarded.
+    pub fn advance_sequences_past_column_max(&mut self) -> Result<Vec<SequenceCursorRepair>> {
+        let sequences = self
+            .iter(ST_SEQUENCE_ID)?
+            .map(|row_ref| -> Result<_> { Ok((row_ref.pointer(), StSequenceRow::try_from(row_ref)?)) })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut repairs = Vec::new();
+        for (row_ptr, sequence) in sequences {
+            let Some(column_max) = self.sequence_column_max(&sequence)? else {
+                continue;
+            };
+            if sequence.allocated > column_max {
+                continue;
+            }
+            let repaired_allocated = column_max
+                .checked_add(SequenceSchema::INCREMENT)
+                .ok_or(SequenceError::Overflow(column_max))?;
+            let repaired_row = StSequenceRow {
+                allocated: repaired_allocated,
+                ..sequence.clone()
+            };
+            self.delete(ST_SEQUENCE_ID, row_ptr)?;
+            // `GENERATE = false`: system sequence ids may be 0, which would otherwise trigger autoinc.
+            with_sys_table_buf(|buf| -> Result<()> {
+                to_writer(buf, &repaired_row).map_err(anyhow::Error::from)?;
+                self.insert::<false>(ST_SEQUENCE_ID, buf)?;
+                Ok(())
+            })?;
+            repairs.push(SequenceCursorRepair {
+                sequence_name: sequence.sequence_name,
+                table_id: sequence.table_id,
+                previous_allocated: sequence.allocated,
+                repaired_allocated,
+            });
+        }
+        Ok(repairs)
+    }
+
+    /// The largest value stored in the column backing `sequence`, if the table has rows.
+    fn sequence_column_max(&self, sequence: &StSequenceRow) -> Result<Option<i128>> {
+        // Tables without any committed or inserted rows may have no in-memory table yet.
+        if self.table_row_count(sequence.table_id).unwrap_or(0) == 0 {
+            return Ok(None);
+        }
+        let mut column_max: Option<i128> = None;
+        for row in self.iter(sequence.table_id)? {
+            let value = row
+                .read_col::<AlgebraicValue>(sequence.col_pos)?
+                .to_i128_lossy()
+                .ok_or(SequenceError::NonIntegerColumn(sequence.sequence_id))?;
+            column_max = Some(column_max.map_or(value, |max| max.max(value)));
+        }
+        Ok(column_max)
     }
 
     /// Inserts constraint metadata into system tables only.

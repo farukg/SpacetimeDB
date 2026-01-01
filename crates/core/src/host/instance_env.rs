@@ -42,6 +42,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::vec::IntoIter;
 
+mod http_policy;
+
 pub struct InstanceEnv {
     pub replica_ctx: Arc<ReplicaContext>,
     pub scheduler: Scheduler,
@@ -1091,21 +1093,11 @@ impl InstanceEnv {
             return Err(NodesError::HttpError(BLOCKED_HTTP_ADDRESS_ERROR.to_string()));
         }
 
-        let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
-            if is_blocked_ip_literal(attempt.url()) {
-                attempt.error(BLOCKED_HTTP_ADDRESS_ERROR)
-            } else {
-                reqwest::redirect::Policy::default().redirect(attempt)
-            }
-        });
-
         // TODO(procedure-metrics): record size in bytes of response, time spent awaiting response.
 
         // Actually execute the HTTP request!
         // TODO(perf): Stash a long-lived `Client` in the env somewhere, rather than building a new one for each call.
-        let execute_fut = reqwest::Client::builder()
-            .dns_resolver(Arc::new(FilteredDnsResolver))
-            .redirect(redirect_policy)
+        let execute_fut = http_policy::legacy_client_builder()
             .build()
             .map_err(http_error)?
             .execute(reqwest);
@@ -1378,7 +1370,7 @@ fn convert_http_request(request: st_http::Request) -> http::Result<(http::reques
         st_http::Method::Options => http::Method::OPTIONS,
         st_http::Method::Trace => http::Method::TRACE,
         st_http::Method::Patch => http::Method::PATCH,
-        st_http::Method::Extension(method) => http::Method::from_bytes(method.as_bytes()).expect("Invalid HTTP method"),
+        st_http::Method::Extension(method) => http::Method::from_bytes(method.as_bytes())?,
     };
     // The error type here, `http::uri::InvalidUri`, doesn't contain the URI itself,
     // so it's safe to return and to log.
@@ -1672,6 +1664,53 @@ pub(super) mod test {
             _ => panic!("module HTTP request was not rejected by configuration"),
         }
 
+        Ok(())
+    }
+
+    fn blocked_strict_http_request() -> st_http::RequestWithPolicy {
+        st_http::RequestWithPolicy {
+            policy: st_http::HttpRequestPolicy::ExactOrigin { response_limit: 64 },
+            request: st_http::Request {
+                method: st_http::Method::Get,
+                headers: std::iter::empty().collect(),
+                timeout: None,
+                // RFC 5737 TEST-NET-3 is rejected before network I/O.
+                uri: "https://203.0.113.1:9".to_owned(),
+                version: st_http::Version::Http11,
+            },
+        }
+    }
+
+    #[test]
+    fn module_http_config_disables_strict_requests_before_transaction_and_transport() -> Result<()> {
+        let db = relational_db()?;
+        let (scheduler, _) = Scheduler::open(db.clone());
+        let (_, idc_sender) = crate::host::idc_actor::channel(&db.database_identity());
+        let (replica_context, runtime) = replica_ctx(db, crate::config::ModuleHttpConfig { enabled: false })?;
+        let mut env = InstanceEnv::new(Arc::new(replica_context), scheduler, idc_sender);
+
+        let error = runtime
+            .block_on(env.http_request_with_policy(blocked_strict_http_request(), bytes::Bytes::new()))
+            .err();
+        assert_eq!(error, Some(st_http::HttpPolicyError::HostFailure));
+
+        env.start_mutable_tx()?;
+        let error = runtime
+            .block_on(env.http_request_with_policy(blocked_strict_http_request(), bytes::Bytes::new()))
+            .err();
+        assert_eq!(error, Some(st_http::HttpPolicyError::HostFailure));
+        env.abort_mutable_tx()?;
+        Ok(())
+    }
+
+    #[test]
+    fn enabled_strict_http_still_applies_address_policy() -> Result<()> {
+        let db = relational_db()?;
+        let (mut env, runtime) = instance_env(db)?;
+        let error = runtime
+            .block_on(env.http_request_with_policy(blocked_strict_http_request(), bytes::Bytes::new()))
+            .err();
+        assert_eq!(error, Some(st_http::HttpPolicyError::BlockedAddress));
         Ok(())
     }
 

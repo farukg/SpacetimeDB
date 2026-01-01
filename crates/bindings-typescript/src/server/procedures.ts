@@ -222,7 +222,7 @@ export function callProcedure(
 }
 
 type IProcedureCtx<S extends UntypedSchemaDef> = ProcedureCtx<S>;
-export const ProcedureCtxImpl = class ProcedureCtx<S extends UntypedSchemaDef>
+class ProcedureCtxImplClass<S extends UntypedSchemaDef>
   implements IProcedureCtx<S>
 {
   #identity: Identity | undefined;
@@ -324,4 +324,6 @@ export const ProcedureCtxImpl = class ProcedureCtx<S extends UntypedSchemaDef>
     const counter = (this.#uuidCounter ??= { value: 0 });
     return Uuid.fromCounterV7(counter, this.timestamp, bytes);
   }
-};
+}
+
+export const ProcedureCtxImpl = ProcedureCtxImplClass;

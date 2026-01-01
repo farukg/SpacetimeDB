@@ -28,7 +28,6 @@ petgraph.workspace = true
 smallvec.workspace = true
 enum-as-inner.workspace = true
 enum-map.workspace = true
-insta.workspace = true
 termcolor.workspace = true
 convert_case.workspace = true
 
@@ -37,6 +36,7 @@ spacetimedb-lib = { path = "../lib", features = ["test", "proptest"] }
 # these are circular dependencies, but only in tests, so it's fine
 spacetimedb-testing = { path = "../testing" }
 
+insta.workspace = true
 proptest.workspace = true
 serial_test.workspace = true
 

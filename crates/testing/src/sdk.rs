@@ -1,6 +1,6 @@
 use duct::cmd;
 use rand::seq::IteratorRandom;
-use spacetimedb::messages::control_db::HostType;
+use spacetimedb_core::messages::control_db::HostType;
 use spacetimedb_data_structures::map::HashMap;
 use spacetimedb_guard::SpacetimeDbGuard;
 use spacetimedb_paths::{RootDir, SpacetimePaths};

@@ -23,6 +23,25 @@ fn cargo_cmd(subcommand: &str, build_debug: bool, args: &[&str]) -> duct::Expres
     )
 }
 
+fn rust_compiler(project_path: &Path, configured: Option<OsString>) -> anyhow::Result<OsString> {
+    if let Some(compiler) = configured {
+        return Ok(compiler);
+    }
+    if !has_rust_up() {
+        return Ok(OsString::from("rustc"));
+    }
+    let compiler = cmd!("rustup", "which", "rustc")
+        .dir(project_path)
+        .read()
+        .context("resolve the module's Rust compiler")?;
+    let compiler = PathBuf::from(compiler.trim());
+    anyhow::ensure!(
+        compiler.is_absolute() && compiler.is_file(),
+        "rustup returned an invalid compiler path"
+    );
+    Ok(compiler.into_os_string())
+}
+
 pub(crate) fn build_rust(
     project_path: &Path,
     features: Option<&std::ffi::OsString>,
@@ -90,7 +109,14 @@ pub(crate) fn build_rust(
     // Convert Vec<String> to Vec<&str>
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-    let reader = cargo_cmd("build", build_debug, &args_str).dir(project_path).reader()?;
+    let compiler = rust_compiler(project_path, std::env::var_os("RUSTC"))?;
+    let reader = cargo_cmd("build", build_debug, &args_str)
+        .env("RUSTC", compiler)
+        // Do not leak host-target linker flags from an outer cargo invocation into this
+        // wasm-only build; Cargo's target-specific config must own the wasm flags.
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .dir(project_path)
+        .reader()?;
 
     let mut artifact = None;
     for message in Message::parse_stream(io::BufReader::new(reader)) {
@@ -188,4 +214,36 @@ pub(crate) fn rustfmt(files: impl IntoIterator<Item = PathBuf>) -> anyhow::Resul
     )
     .run()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_module_compiler_builds_wasm_outside_project_directory() -> anyhow::Result<()> {
+        let compiler = rust_compiler(Path::new(env!("CARGO_MANIFEST_DIR")), None)?;
+        assert!(Path::new(&compiler).is_absolute());
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("probe.rs");
+        let artifact = directory.path().join("probe.rlib");
+        fs::write(&source, "#![no_std]\npub fn value() -> u32 { 7 }\n")?;
+        let output = std::process::Command::new(compiler)
+            .current_dir(directory.path())
+            .args(["--target", "wasm32-unknown-unknown", "--crate-type", "rlib"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&artifact)
+            .output()?;
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(artifact.metadata()?.len() > 0);
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_compiler_selection_is_preserved() -> anyhow::Result<()> {
+        let configured = OsString::from("custom-compiler");
+        assert_eq!(rust_compiler(Path::new("."), Some(configured.clone()))?, configured);
+        Ok(())
+    }
 }

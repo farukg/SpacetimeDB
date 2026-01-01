@@ -6,9 +6,9 @@ use axum::http::{StatusCode, Version};
 use axum::routing::post;
 use axum::Router;
 use serde::Deserialize;
-use spacetimedb::db::relational_db::RelationalDB;
-use spacetimedb::host::idc_actor::{self, IdcConfig};
-use spacetimedb::host::ModuleHost;
+use spacetimedb_core::db::relational_db::RelationalDB;
+use spacetimedb_core::host::idc_actor::{self, IdcConfig};
+use spacetimedb_core::host::ModuleHost;
 use spacetimedb_datastore::execution_context::{Workload, WorkloadType};
 use spacetimedb_datastore::system_tables::{StOutboundMsgRow, StOutboundStreamRow, ST_OUTBOUND_STREAM_ID};
 use spacetimedb_datastore::traits::IsolationLevel;
@@ -85,7 +85,7 @@ fn idc_actor_bounds_active_messages_and_reports_metrics() {
 }
 
 async fn run_bounded_actor_test(host: ModuleHost) -> anyhow::Result<()> {
-    use spacetimedb::worker_metrics::WORKER_METRICS;
+    use spacetimedb_core::worker_metrics::WORKER_METRICS;
     use spacetimedb_datastore::db_metrics::DB_METRICS;
 
     let identity = &host.info.database_identity;
@@ -129,7 +129,7 @@ async fn run_bounded_actor_test(host: ModuleHost) -> anyhow::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let config = IdcConfig {
         http_port: listener.local_addr()?.port(),
-        token_signer: Arc::new(spacetimedb::auth::JwtKeys::generate()?.private),
+        token_signer: Arc::new(spacetimedb_core::auth::JwtKeys::generate()?.private),
     };
     let server = tokio::spawn(async move { axum::serve(listener, app).await });
     let _server_abort = scopeguard::guard(server.abort_handle(), |handle| handle.abort());
@@ -312,7 +312,7 @@ async fn wait_for_ack(db: &RelationalDB, target: Identity, prefix: u64) -> anyho
 }
 
 async fn run_actor_test(host: ModuleHost) -> anyhow::Result<()> {
-    let keys = spacetimedb::auth::JwtKeys::generate()?;
+    let keys = spacetimedb_core::auth::JwtKeys::generate()?;
     let (captured_tx, mut captured_rx) = mpsc::unbounded_channel();
     // The slow target blocks its first sequence and fails the first attempt.
     // The fast target accepts immediately.
@@ -546,7 +546,7 @@ async fn run_shutdown_test(host: ModuleHost) -> anyhow::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let config = IdcConfig {
         http_port: listener.local_addr()?.port(),
-        token_signer: Arc::new(spacetimedb::auth::JwtKeys::generate()?.private),
+        token_signer: Arc::new(spacetimedb_core::auth::JwtKeys::generate()?.private),
     };
     let app = app.into_make_service_with_connect_info::<SocketAddr>();
     let server = tokio::spawn(async move { axum::serve(listener, app).await });

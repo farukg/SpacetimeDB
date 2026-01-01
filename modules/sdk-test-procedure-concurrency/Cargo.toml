@@ -13,3 +13,6 @@ log.workspace = true
 [dependencies.spacetimedb]
 workspace = true
 features = ["unstable"]
+
+[lints]
+workspace = true

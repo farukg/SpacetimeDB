@@ -91,7 +91,7 @@ impl Lang for TypeScript {
         module: &ModuleDef,
         table: &TableDef,
         _schema: TableSchema,
-    ) -> OutputFile {
+    ) -> Result<OutputFile, crate::CodegenError> {
         let mut output = CodeIndenter::new(String::new(), INDENT);
         let out = &mut output;
 
@@ -126,78 +126,90 @@ impl Lang for TypeScript {
         .unwrap();
         out.dedent(1);
         writeln!(out, "}});");
-        OutputFile {
+        Ok(OutputFile {
             filename: table_module_name(&table.accessor_name) + ".ts",
             code: output.into_inner(),
-        }
+        })
     }
 
-    fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
+    fn generate_reducer_file(
+        &self,
+        module: &ModuleDef,
+        reducer: &ReducerDef,
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = CodeIndenter::new(String::new(), INDENT);
+            let out = &mut output;
 
-        print_file_header(out, false, true);
+            print_file_header(out, false, true);
 
-        out.newline();
+            out.newline();
 
-        gen_and_print_imports(
-            module,
-            out,
-            reducer.params_for_generate.element_types(),
-            // No need to skip any imports; we're not emitting a type that other modules can import.
-            &[],
-            self.import_extension.suffix(),
-        );
+            gen_and_print_imports(
+                module,
+                out,
+                reducer.params_for_generate.element_types(),
+                // No need to skip any imports; we're not emitting a type that other modules can import.
+                &[],
+                self.import_extension.suffix(),
+            );
 
-        define_body_for_reducer(module, out, &reducer.params_for_generate.elements);
+            define_body_for_reducer(module, out, &reducer.params_for_generate.elements);
 
-        OutputFile {
-            filename: reducer_module_name(&reducer.accessor_name) + ".ts",
-            code: output.into_inner(),
-        }
+            OutputFile {
+                filename: reducer_module_name(&reducer.accessor_name) + ".ts",
+                code: output.into_inner(),
+            }
+        })
     }
 
     fn generate_procedure_file(
         &self,
         module: &ModuleDef,
         procedure: &spacetimedb_schema::def::ProcedureDef,
-    ) -> OutputFile {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = CodeIndenter::new(String::new(), INDENT);
+            let out = &mut output;
 
-        print_file_header(out, false, true);
+            print_file_header(out, false, true);
 
-        out.newline();
+            out.newline();
 
-        gen_and_print_imports(
-            module,
-            out,
-            procedure
-                .params_for_generate
-                .element_types()
-                .chain([&procedure.return_type_for_generate]),
-            // No need to skip any imports; we're not emitting a type that other modules can import.
-            &[],
-            self.import_extension.suffix(),
-        );
+            gen_and_print_imports(
+                module,
+                out,
+                procedure
+                    .params_for_generate
+                    .element_types()
+                    .chain([&procedure.return_type_for_generate]),
+                // No need to skip any imports; we're not emitting a type that other modules can import.
+                &[],
+                self.import_extension.suffix(),
+            );
 
-        writeln!(out, "export const params = {{");
-        out.with_indent(|out| {
-            write_object_type_builder_fields(module, out, &procedure.params_for_generate.elements, None, true, None)
-                .unwrap()
-        });
-        writeln!(out, "}};");
+            writeln!(out, "export const params = {{");
+            out.with_indent(|out| {
+                write_object_type_builder_fields(module, out, &procedure.params_for_generate.elements, None, true, None)
+                    .unwrap()
+            });
+            writeln!(out, "}};");
 
-        write!(out, "export const returnType = ");
-        write_type_builder(module, out, &procedure.return_type_for_generate).unwrap();
+            write!(out, "export const returnType = ");
+            write_type_builder(module, out, &procedure.return_type_for_generate).unwrap();
 
-        OutputFile {
-            filename: procedure_module_name(&procedure.accessor_name) + ".ts",
-            code: output.into_inner(),
-        }
+            OutputFile {
+                filename: procedure_module_name(&procedure.accessor_name) + ".ts",
+                code: output.into_inner(),
+            }
+        })
     }
 
-    fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
+    fn generate_global_files(
+        &self,
+        module: &ModuleDef,
+        options: &CodegenOptions,
+    ) -> Result<Vec<OutputFile>, crate::CodegenError> {
         let ext = self.import_extension.suffix();
         let mut output = CodeIndenter::new(String::new(), INDENT);
         let out = &mut output;
@@ -426,8 +438,8 @@ impl Lang for TypeScript {
 
         writeln!(out);
         writeln!(
-            out,
-            "/** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */"
+        out,
+        "/** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */"
         );
         writeln!(out, "const proceduresSchema = __procedures(");
         out.indent(1);
@@ -644,9 +656,9 @@ impl Lang for TypeScript {
                 );
             } else {
                 writeln!(
-                    out,
-                    "export const tables: __QueryBuilder<typeof tablesSchema.schemaType> = __makeQueryBuilder(tablesSchema.schemaType);"
-                );
+                out,
+                "export const tables: __QueryBuilder<typeof tablesSchema.schemaType> = __makeQueryBuilder(tablesSchema.schemaType);"
+        );
             }
         } else {
             writeln!(out, "const __qb = __makeQueryBuilder(tablesSchema.schemaType);");
@@ -835,8 +847,8 @@ impl Lang for TypeScript {
         writeln!(out, "static builder = (): DbConnectionBuilder => {{");
         out.indent(1);
         writeln!(
-            out,
-            "return new DbConnectionBuilder(REMOTE_MODULE, (config: __DbConnectionConfig<typeof REMOTE_MODULE>) => new DbConnection(config));"
+        out,
+        "return new DbConnectionBuilder(REMOTE_MODULE, (config: __DbConnectionConfig<typeof REMOTE_MODULE>) => new DbConnection(config));"
         );
         out.dedent(1);
         writeln!(out, "}};");
@@ -875,7 +887,7 @@ impl Lang for TypeScript {
             files.push(generate_types_file_with_path(owning_def, filename));
         }
 
-        files
+        Ok(files)
     }
 }
 
@@ -1272,7 +1284,10 @@ fn write_type_builder_field(
     }
     write_type_builder(module, out, ty)?;
     if is_primary_key {
-        write!(out, ".primaryKey()");
+        // Custom domain types (Refs) don't have a .primaryKey() builder method in the JS SDK.
+        if !matches!(ty, AlgebraicTypeUse::Ref(_)) {
+            write!(out, ".primaryKey()");
+        }
     }
     if let Some(original_name) = original_name {
         write!(out, ".name(\"{original_name}\")");

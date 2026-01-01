@@ -74,7 +74,7 @@ mod callgrind_benches {
             db.insert_bulk(&table_id, to_preload).unwrap();
 
             // measure
-            spacetimedb::callgrind_flag::enable_callgrind_globally(|| {
+            spacetimedb_core::callgrind_flag::enable_callgrind_globally(|| {
                 db.insert_bulk(&table_id, data).unwrap();
             });
 
@@ -144,7 +144,7 @@ mod callgrind_benches {
             db.update_bulk::<T>(&table_id, self.count).unwrap();
 
             // measure
-            spacetimedb::callgrind_flag::enable_callgrind_globally(|| {
+            spacetimedb_core::callgrind_flag::enable_callgrind_globally(|| {
                 db.update_bulk::<T>(&table_id, self.count).unwrap();
             });
 
@@ -208,7 +208,7 @@ mod callgrind_benches {
             db.iterate(&table_id).unwrap();
 
             // measure
-            spacetimedb::callgrind_flag::enable_callgrind_globally(|| {
+            spacetimedb_core::callgrind_flag::enable_callgrind_globally(|| {
                 db.iterate(&table_id).unwrap();
             });
 
@@ -307,7 +307,7 @@ mod callgrind_benches {
             db.filter::<T>(&table_id, self._column, filter_value.clone()).unwrap();
 
             // measure
-            spacetimedb::callgrind_flag::enable_callgrind_globally(|| {
+            spacetimedb_core::callgrind_flag::enable_callgrind_globally(|| {
                 db.filter::<T>(&table_id, self._column, filter_value.clone()).unwrap();
             });
 
@@ -443,7 +443,7 @@ mod callgrind_benches {
             db.filter::<T>(&table_id, 0, filter_value.clone()).unwrap();
 
             // measure
-            spacetimedb::callgrind_flag::enable_callgrind_globally(|| {
+            spacetimedb_core::callgrind_flag::enable_callgrind_globally(|| {
                 db.filter::<T>(&table_id, 0, filter_value.clone()).unwrap();
             });
 
@@ -477,7 +477,7 @@ mod callgrind_benches {
             db.empty_transaction().unwrap();
 
             // measure
-            spacetimedb::callgrind_flag::enable_callgrind_globally(|| db.empty_transaction().unwrap());
+            spacetimedb_core::callgrind_flag::enable_callgrind_globally(|| db.empty_transaction().unwrap());
         }
     }
 
@@ -534,7 +534,7 @@ mod callgrind_benches {
                 .map(|row| spacetimedb_lib::AlgebraicValue::Product(row.into_product_value()))
                 .collect::<ProductValue>();
 
-            spacetimedb::callgrind_flag::enable_callgrind_globally(|| {
+            spacetimedb_core::callgrind_flag::enable_callgrind_globally(|| {
                 // don't time deallocation: return this!
                 spacetimedb_lib::sats::bsatn::to_vec(&data).unwrap()
             }); // allocation dropped here
@@ -570,7 +570,7 @@ mod callgrind_benches {
                 .map(|row| spacetimedb_lib::AlgebraicValue::Product(row.into_product_value()))
                 .collect::<ProductValue>();
 
-            spacetimedb::callgrind_flag::enable_callgrind_globally(|| {
+            spacetimedb_core::callgrind_flag::enable_callgrind_globally(|| {
                 // don't time deallocation: return this!
                 serde_json::to_string(&data).unwrap()
             }); // allocation dropped here
@@ -596,7 +596,7 @@ mod callgrind_benches {
                     .pass_through_envs(["HOME", "PATH", "RUST_LOG", "RUST_BACKTRACE"])
                     // THE NEXT LINE IS CRITICAL.
                     // Without this line, this entire file breaks!
-                    .with_custom_entry_point("spacetimedb::callgrind_flag::flag");
+                    .with_custom_entry_point("spacetimedb_core::callgrind_flag::flag");
         library_benchmark_groups = insert_bulk_group, update_bulk_group, filter_group,
                                 iterate_group, empty_transaction_group,
                                 serialize_group

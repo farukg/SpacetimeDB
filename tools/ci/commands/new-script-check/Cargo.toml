@@ -8,3 +8,6 @@ anyhow.workspace = true
 clap.workspace = true
 ci-common = { path = "../../common" }
 ci-script-policy = { path = "../../script-policy" }
+
+[lints]
+workspace = true

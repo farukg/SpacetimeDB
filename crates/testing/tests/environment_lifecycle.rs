@@ -1,15 +1,15 @@
 //! Actual module persistence with explicit local input, without a server or CLI configuration.
 use futures::FutureExt as _;
-use spacetimedb::config::{CertificateAuthority, ModuleHttpConfig, V8Config, WasmConfig};
-use spacetimedb::db;
-use spacetimedb::db::persistence::DurabilityConfig;
-use spacetimedb::host::{FunctionArgs, UpdateDatabaseResult};
-use spacetimedb::messages::control_db::HostType;
-use spacetimedb::util::jobs::JobCores;
 use spacetimedb_client_api::routes::subscribe::WebSocketOptions;
 use spacetimedb_client_api::{
     ControlStateReadAccess as _, ControlStateWriteAccess as _, DatabaseDef, DatabaseResetDef, NodeDelegate as _,
 };
+use spacetimedb_core::config::{CertificateAuthority, ModuleHttpConfig, V8Config, WasmConfig};
+use spacetimedb_core::db;
+use spacetimedb_core::db::persistence::DurabilityConfig;
+use spacetimedb_core::host::{FunctionArgs, UpdateDatabaseResult};
+use spacetimedb_core::messages::control_db::HostType;
+use spacetimedb_core::util::jobs::JobCores;
 use spacetimedb_lib::environment::{EnvironmentRemove, EnvironmentUpdate};
 use spacetimedb_lib::{bsatn, sats::product, AlgebraicValue, Identity};
 use spacetimedb_paths::cli::{PrivKeyPath, PubKeyPath};

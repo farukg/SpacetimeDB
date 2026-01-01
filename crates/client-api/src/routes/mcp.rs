@@ -5,10 +5,10 @@ use axum::response::{ErrorResponse, IntoResponse, Response};
 use axum::{Extension, Json};
 use http::StatusCode;
 use serde_json::{json, Value};
-use spacetimedb::auth::identity::ConnectionAuthCtx;
-use spacetimedb::host::{FunctionArgs, ReducerOutcome};
-use spacetimedb::identity::Identity;
-use spacetimedb::messages::control_db::Database;
+use spacetimedb_core::auth::identity::ConnectionAuthCtx;
+use spacetimedb_core::host::{FunctionArgs, ReducerOutcome};
+use spacetimedb_core::identity::Identity;
+use spacetimedb_core::messages::control_db::Database;
 use spacetimedb_lib::db::raw_def::v9::RawModuleDefV9;
 use spacetimedb_lib::sats;
 
@@ -568,7 +568,7 @@ mod tests {
     }
 
     fn test_database() -> Database {
-        use spacetimedb::messages::control_db::HostType;
+        use spacetimedb_core::messages::control_db::HostType;
         use spacetimedb_lib::Hash;
 
         Database {
@@ -667,7 +667,7 @@ mod tests {
 
     #[test]
     fn list_databases_shows_only_the_callers_own() {
-        use spacetimedb::messages::control_db::HostType;
+        use spacetimedb_core::messages::control_db::HostType;
         use spacetimedb_lib::Hash;
 
         let caller = Identity::from_hex("11".repeat(32)).unwrap();

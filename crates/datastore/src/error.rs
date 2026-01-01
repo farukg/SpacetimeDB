@@ -122,6 +122,8 @@ pub enum SequenceError {
     NotFound(SequenceId),
     #[error("Incrementing sequence with previous value {0} would result in integer overflow")]
     Overflow(i128),
+    #[error("Sequence ID `{0}` is attached to a column holding a non-integer value.")]
+    NonIntegerColumn(SequenceId),
 }
 
 impl From<InvalidFieldError> for DatastoreError {

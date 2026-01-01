@@ -16,9 +16,9 @@ use futures::TryStreamExt;
 use http::{HeaderName, HeaderValue, StatusCode};
 
 use hyper::body::Body;
-use spacetimedb::Identity;
 use spacetimedb_client_api_messages::name::DatabaseName;
 use tokio::task::{JoinError, JoinHandle};
+use spacetimedb_core::Identity;
 
 use crate::routes::identity::IdentityForUrl;
 use crate::{log_and_500, ControlStateReadAccess};

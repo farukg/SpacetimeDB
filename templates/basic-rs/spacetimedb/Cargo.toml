@@ -11,3 +11,6 @@ crate-type = ["cdylib"]
 [dependencies]
 spacetimedb = { path = "../../../crates/bindings" }
 log = "0.4"
+
+# Templates also run as standalone projects outside this workspace.
+[lints]

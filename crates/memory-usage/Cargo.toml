@@ -17,3 +17,6 @@ hashbrown = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 ethnum = { workspace = true, optional = true }
 decorum = { workspace = true, optional = true }
+
+[lints]
+workspace = true

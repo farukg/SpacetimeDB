@@ -195,7 +195,7 @@ pub async fn exec_add(mut config: Config, args: &ArgMatches) -> Result<(), anyho
     let default = *args.get_one::<bool>("default").unwrap();
     let no_fingerprint = *args.get_one::<bool>("no-fingerprint").unwrap();
 
-    let (host, protocol) = host_or_url_to_host_and_protocol(url);
+    let (host, protocol) = host_or_url_to_host_and_protocol(url)?;
     let protocol = protocol.ok_or_else(|| anyhow::anyhow!("Invalid url: {url}"))?;
 
     valid_protocol_or_error(protocol)?;
@@ -312,7 +312,7 @@ pub async fn exec_edit(mut config: Config, args: &ArgMatches) -> Result<(), anyh
     let (new_host, new_proto) = match new_url {
         None => (None, None),
         Some(new_url) => {
-            let (new_host, new_proto) = host_or_url_to_host_and_protocol(new_url);
+            let (new_host, new_proto) = host_or_url_to_host_and_protocol(new_url)?;
             let new_proto = new_proto.ok_or_else(|| anyhow::anyhow!("Invalid url: {new_url}"))?;
             (Some(new_host), Some(new_proto))
         }

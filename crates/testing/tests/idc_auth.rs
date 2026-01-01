@@ -1,9 +1,9 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
-use spacetimedb::auth::idc;
-use spacetimedb::db::{Config, Storage};
 use spacetimedb_client_api::routes::database::DatabaseRoutes;
 use spacetimedb_client_api::NodeDelegate;
+use spacetimedb_core::auth::idc;
+use spacetimedb_core::db::{Config, Storage};
 use spacetimedb_lib::sats::product;
 use spacetimedb_lib::{bsatn, Hash, Identity};
 use spacetimedb_schema::def::reducer_signature_hash;

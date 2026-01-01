@@ -12,3 +12,6 @@ crate-type = ["cdylib"]
 [dependencies.spacetimedb]
 workspace = true
 features = ["unstable"]
+
+[lints]
+workspace = true

@@ -18,3 +18,6 @@ log = "0.4"
 # containing every table name registered by the `#[table]` macro.
 # Only active during `cargo test`; it has no effect on the WASM build.
 spacetimedb = { path = "../../../crates/bindings", features = ["test-utils", "unstable"] }
+
+# Templates also run as standalone projects outside this workspace.
+[lints]

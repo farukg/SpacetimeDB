@@ -10,3 +10,6 @@ duct.workspace = true
 regex.workspace = true
 serde_json.workspace = true
 ci-common = { path = "../../common" }
+
+[lints]
+workspace = true

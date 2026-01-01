@@ -15,6 +15,7 @@ mod client_cache;
 mod compression;
 mod db_connection;
 mod metrics;
+mod procedure_lifecycle;
 mod spacetime_module;
 mod subscription;
 mod websocket;

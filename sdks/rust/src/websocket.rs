@@ -2,47 +2,47 @@
 //!
 //! This module is internal, and may incompatibly change without warning.
 
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use bytes::Bytes;
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
 use futures::{SinkExt, StreamExt as _};
 use futures_channel::mpsc;
 use http::uri::{InvalidUri, Scheme, Uri};
 use spacetimedb_client_api_messages::websocket as ws;
 use spacetimedb_lib::{bsatn, ConnectionId};
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use std::mem;
 use std::sync::Arc;
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Mutex;
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 use thiserror::Error;
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::{net::TcpStream, runtime, task::JoinHandle, time::Instant};
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::{
     connect_async_with_config,
     tungstenite::client::IntoClientRequest,
     tungstenite::protocol::{Message as WebSocketMessage, WebSocketConfig},
     MaybeTlsStream, WebSocketStream,
 };
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 use tokio_tungstenite_wasm::{Message as WebSocketMessage, WebSocketStream};
 
 use crate::compression::decompress_server_message;
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use crate::db_connection::debug_log;
 use crate::metrics::CLIENT_METRICS;
 
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 type TokioTungsteniteError = tokio_tungstenite::tungstenite::Error;
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 type TokioTungsteniteError = tokio_tungstenite_wasm::Error;
 
 #[derive(Error, Debug, Clone)]
@@ -99,16 +99,16 @@ pub enum WsError {
     #[error("Unrecognized compression scheme: {scheme:#x}")]
     UnknownCompressionScheme { scheme: u8 },
 
-    #[cfg(feature = "browser")]
+    #[cfg(target_arch = "wasm32")]
     #[error("Token verification error: {0}")]
     TokenVerification(String),
 }
 
 pub(crate) struct WsConnection {
     db_name: Box<str>,
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     sock: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    #[cfg(feature = "browser")]
+    #[cfg(target_arch = "wasm32")]
     sock: WebSocketStream,
 }
 
@@ -137,12 +137,12 @@ pub(crate) struct WsParams {
     pub confirmed: Option<bool>,
 }
 
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn make_uri(host: Uri, db_name: &str, connection_id: Option<ConnectionId>, params: WsParams) -> Result<Uri, UriError> {
     make_uri_impl(host, db_name, connection_id, params, None)
 }
 
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 fn make_uri(
     host: Uri,
     db_name: &str,
@@ -225,7 +225,7 @@ fn make_uri_impl(
 //       rather than having Tungstenite manage its own connections. Should this library do
 //       the same?
 
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn make_request(
     host: Uri,
     db_name: &str,
@@ -243,7 +243,7 @@ fn make_request(
     Ok(req)
 }
 
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn request_insert_protocol_header(req: &mut http::Request<()>) {
     req.headers_mut().insert(
         http::header::SEC_WEBSOCKET_PROTOCOL,
@@ -251,7 +251,7 @@ fn request_insert_protocol_header(req: &mut http::Request<()>) {
     );
 }
 
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn request_insert_auth_header(req: &mut http::Request<()>, token: Option<&str>) {
     if let Some(token) = token {
         let auth = ["Bearer ", token].concat().try_into().unwrap();
@@ -259,7 +259,7 @@ fn request_insert_auth_header(req: &mut http::Request<()>, token: Option<&str>) 
     }
 }
 
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 async fn fetch_ws_token(host: &Uri, auth_token: &str) -> Result<String, WsError> {
     use gloo_net::http::{Method, RequestBuilder};
     use js_sys::{Reflect, JSON};
@@ -309,7 +309,7 @@ async fn fetch_ws_token(host: &Uri, auth_token: &str) -> Result<String, WsError>
 /// If `res` evaluates to `Err(e)`, log a warning in the form `"{}: {:?}", $cause, e`.
 ///
 /// Could be trivially written as a function, but macro-ifying it preserves the source location of the log.
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 macro_rules! maybe_log_error {
     ($extra_logging:expr, $cause:expr, $res:expr) => {
         if let Err(e) = $res {
@@ -321,7 +321,7 @@ macro_rules! maybe_log_error {
 }
 
 impl WsConnection {
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) async fn connect(
         host: Uri,
         db_name: &str,
@@ -353,7 +353,7 @@ impl WsConnection {
         })
     }
 
-    #[cfg(feature = "browser")]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) async fn connect(
         host: Uri,
         db_name: &str,
@@ -390,7 +390,7 @@ impl WsConnection {
         WebSocketMessage::Binary(bsatn::to_vec(&msg).unwrap().into())
     }
 
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     async fn message_loop(
         mut self,
         incoming_messages: mpsc::UnboundedSender<ws::v2::ServerMessage>,
@@ -489,8 +489,14 @@ impl WsConnection {
                         record_metrics(payload.len());
                     },
 
+                    Ok(Some(WebSocketMessage::Close(frame))) => {
+                        debug_log(&extra_logging, |file| writeln!(file, "Connection closed by peer {frame:?}"));
+                        log::info!("Connection closed by peer {frame:?}");
+                        break;
+                    },
+
                     Ok(Some(other)) => {
-                        debug_log(&extra_logging, |file| writeln!(file, "Unexpeccted WebSocket message {other:?}"));
+                        debug_log(&extra_logging, |file| writeln!(file, "Unexpected WebSocket message {other:?}"));
                         log::warn!("Unexpected WebSocket message {other:?}");
                         idle = false;
                         record_metrics(other.len());
@@ -536,7 +542,7 @@ impl WsConnection {
         }
     }
 
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn spawn_message_loop(
         self,
         runtime: &runtime::Handle,
@@ -552,7 +558,7 @@ impl WsConnection {
         (handle, incoming_recv, outgoing_send)
     }
 
-    #[cfg(feature = "browser")]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn spawn_message_loop(
         self,
     ) -> (

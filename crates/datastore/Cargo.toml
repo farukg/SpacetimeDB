@@ -69,3 +69,6 @@ spacetimedb-schema = { path = "../schema", features = ["test"] }
 # Also as dev-dependencies for use in _this_ crate's tests.
 proptest.workspace = true
 pretty_assertions.workspace = true
+
+[lints]
+workspace = true

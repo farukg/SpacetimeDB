@@ -1,8 +1,8 @@
 //! Actual publication and module calls exercise configuration atomicity and ABI enforcement.
 use serial_test::serial;
-use spacetimedb::client::{messages::SerializableMessage, OutboundMessage};
-use spacetimedb::host::{FunctionArgs, ModuleHost};
 use spacetimedb_client_api_messages::websocket::v1 as ws_v1;
+use spacetimedb_core::client::{messages::SerializableMessage, OutboundMessage};
+use spacetimedb_core::host::{FunctionArgs, ModuleHost};
 use spacetimedb_lib::identity::AuthCtx;
 use spacetimedb_lib::{bsatn, sats::product, AlgebraicValue, Identity};
 use spacetimedb_testing::modules::{CompilationMode, CompiledModule, ModuleHandle, DEFAULT_CONFIG};
@@ -22,7 +22,7 @@ fn emcc_is_available() -> bool {
 }
 
 async fn sql(module: &ModuleHost, statement: &str) -> Vec<spacetimedb_lib::ProductValue> {
-    spacetimedb::sql::execute::run(
+    spacetimedb_core::sql::execute::run(
         module.relational_db().clone(),
         statement.to_string(),
         AuthCtx::for_current(Identity::ZERO),
@@ -149,7 +149,7 @@ async fn check_submodule_scope(
     }
     for &(view, sql_table) in cases.views {
         assert!(module.info.module_def.view_by_name_with_module(view).is_some());
-        let result = spacetimedb::sql::execute::run(
+        let result = spacetimedb_core::sql::execute::run(
             module.relational_db().clone(),
             format!("SELECT * FROM {sql_table}"),
             AuthCtx::for_current(Identity::ZERO),
@@ -186,7 +186,7 @@ async fn check_submodule_scope(
 // Qualification can pin locally built inputs without invoking a nested build.
 // Ordinary test runs keep the existing compilation path when no pin is supplied.
 fn compiled_fixture(name: &str) -> CompiledModule {
-    use spacetimedb::messages::control_db::HostType;
+    use spacetimedb_core::messages::control_db::HostType;
     let input = match name {
         "environment-test" => Some(("SPACETIMEDB_ENV_RUST_MODULE", HostType::Wasm)),
         "module-test-ts" => Some(("SPACETIMEDB_ENV_TYPESCRIPT_MODULE", HostType::Js)),
@@ -297,7 +297,7 @@ fn exercise_fixture(name: &str) {
                 expect_view_update(&mut handle).await;
                 assert!(matches!(
                     handle.republish_environment(values.clone()).await.unwrap(),
-                    spacetimedb::host::UpdateDatabaseResult::NoUpdateNeeded
+                    spacetimedb_core::host::UpdateDatabaseResult::NoUpdateNeeded
                 ));
                 assert!(
                     tokio::time::timeout(Duration::from_millis(100), handle.recv_message())

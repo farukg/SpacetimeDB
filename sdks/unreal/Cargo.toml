@@ -12,3 +12,6 @@ description = "An Unreal SDK for clients to interface with SpacetimeDB"
 [dev-dependencies]
 spacetimedb-testing = { path = "../../crates/testing" }
 serial_test.workspace = true
+
+[lints]
+workspace = true

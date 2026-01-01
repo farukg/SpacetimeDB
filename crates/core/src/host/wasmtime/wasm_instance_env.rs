@@ -35,6 +35,8 @@ use wasmtime::{AsContext, Caller, StoreContextMut};
 /// Other outstanding byte sources count against this interface's handle limit.
 const MAX_OUTSTANDING_ENV_SOURCES: usize = 256;
 
+mod http_policy;
+
 /// A stream of bytes which the WASM module can read from
 /// using [`WasmInstanceEnv::bytes_source_read`].
 ///

@@ -151,7 +151,7 @@ fn namespace_csharp_nested_registration() {
                         loop {
                             let mut complete = true;
                             for (path, id) in [("branch_data.nested_data", 2i32), ("outer_data.branch_data.nested_data", 8)] {
-                                let result = spacetimedb::sql::execute::run(
+                                let result = spacetimedb_core::sql::execute::run(
                                     host.relational_db().clone(),
                                     format!("SELECT * FROM {path}.user WHERE id = 1"),
                                     spacetimedb_lib::identity::AuthCtx::for_current(spacetimedb_lib::Identity::ZERO),
@@ -212,7 +212,7 @@ fn namespace_csharp_nested_registration() {
                     AlgebraicValue::I32(id + 10)
                 );
                 for (view, expected) in [("current", id), ("anonymous", id + 10), ("query_current", id), ("query_anonymous", id + 10)] {
-                    let result = spacetimedb::sql::execute::run(
+                    let result = spacetimedb_core::sql::execute::run(
                         host.relational_db().clone(),
                         format!("SELECT * FROM {path}.{view}"),
                         spacetimedb_lib::identity::AuthCtx::for_current(spacetimedb_lib::Identity::ZERO),
@@ -238,7 +238,7 @@ fn namespace_csharp_nested_registration() {
                 AlgebraicValue::I32(7)
             );
             for (view, expected) in [("nested", 2i32), ("deep", 8)] {
-                let result = spacetimedb::sql::execute::run(
+                let result = spacetimedb_core::sql::execute::run(
                     host.relational_db().clone(),
                     format!("SELECT * FROM {view}"),
                     spacetimedb_lib::identity::AuthCtx::for_current(spacetimedb_lib::Identity::ZERO),
@@ -249,7 +249,7 @@ fn namespace_csharp_nested_registration() {
                 assert_eq!(result.rows, [product![expected]]);
             }
             for (view, expected) in [("branch_data.query_child", 2i32), ("outer_data.branch_data.query_child", 8), ("query_deep", 8), ("query_public", 6)] {
-                let result = spacetimedb::sql::execute::run(
+                let result = spacetimedb_core::sql::execute::run(
                     host.relational_db().clone(),
                     format!("SELECT * FROM {view}"),
                     spacetimedb_lib::identity::AuthCtx::for_current(spacetimedb_lib::Identity::ZERO),

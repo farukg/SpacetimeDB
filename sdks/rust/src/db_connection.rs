@@ -21,33 +21,40 @@
 use crate::{
     __codegen::{InternalError, Reducer},
     callbacks::{
-        CallbackId, DbCallbacks, ProcedureCallback, ProcedureCallbacks, ReducerCallback, ReducerCallbacks, RowCallback,
-        UpdateCallback,
+        CallbackId, DbCallbacks, ProcedureCallback, ReducerCallback, ReducerCallbacks, RowCallback, UpdateCallback,
     },
     client_cache::{ClientCache, TableHandle},
+    procedure_lifecycle::{
+        ConnectTransition, ConnectionActivity, ConnectionEnd, ConnectionLifecycle, ConnectionNotification,
+        ConnectionTermination, ProcedureRegistration, ProcedureResolution, RequestedDisconnect, TerminationTransition,
+    },
     spacetime_module::{AbstractEventContext, AppliedDiff, DbConnection, DbUpdate, InModule, SpacetimeModule},
     subscription::{PendingUnsubscribeResult, SubscriptionHandleImpl, SubscriptionManager},
     websocket::{WsConnection, WsParams},
-    Event, ReducerEvent, Status,
+    Event,
+ReducerEvent,
+Status,
 };
 use bytes::Bytes;
 use futures::StreamExt;
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 use futures::{pin_mut, FutureExt};
-use futures_channel::mpsc;
+use futures_channel::mpsc::{self};
 use http::Uri;
 use spacetimedb_client_api_messages::websocket::{self as ws, common::QuerySetId};
 use spacetimedb_lib::{bsatn, ser::Serialize, ConnectionId, Identity, Timestamp};
 use spacetimedb_sats::Deserialize;
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::OpenOptions;
 use std::{
     fs::File,
     io::Write,
     path::PathBuf,
+    pin::Pin,
     sync::{atomic::AtomicU32, Arc, Mutex as StdMutex, OnceLock},
+    task::{Context as TaskContext, Poll, Waker},
 };
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::{
     runtime::{self, Runtime},
     sync::Mutex as TokioMutex,
@@ -55,10 +62,32 @@ use tokio::{
 
 pub(crate) type SharedCell<T> = Arc<StdMutex<T>>;
 
-#[cfg(not(feature = "browser"))]
+fn lock_shared<T>(cell: &SharedCell<T>) -> std::sync::MutexGuard<'_, T> {
+    match cell.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 type SharedAsyncCell<T> = Arc<TokioMutex<T>>;
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 type SharedAsyncCell<T> = SharedCell<T>;
+
+enum ChannelTryRecvError {
+    Empty,
+    Closed,
+}
+
+fn try_recv_unbounded<T>(recv: &mut mpsc::UnboundedReceiver<T>) -> Result<T, ChannelTryRecvError> {
+    let waker = Waker::noop();
+    let mut cx = TaskContext::from_waker(waker);
+    match Pin::new(recv).poll_next_unpin(&mut cx) {
+        Poll::Ready(Some(value)) => Ok(value),
+        Poll::Ready(None) => Err(ChannelTryRecvError::Closed),
+        Poll::Pending => Err(ChannelTryRecvError::Empty),
+    }
+}
 
 /// Implementation of `DbConnection`, `EventContext`,
 /// and anything else that provides access to the database connection.
@@ -66,13 +95,15 @@ type SharedAsyncCell<T> = SharedCell<T>;
 /// This must be relatively cheaply `Clone`-able, and have internal sharing,
 /// as numerous operations will clone it to get new handles on the connection.
 pub struct DbContextImpl<M: SpacetimeModule> {
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     runtime: runtime::Handle,
 
     /// All the state which is safe to hold a lock on while running callbacks.
     pub(crate) inner: SharedCell<DbContextImplInner<M>>,
 
-    /// None if we have disconnected.
+    connection_lifecycle: SharedCell<ConnectionLifecycle<ProcedureCallback<M>>>,
+
+    /// The active WebSocket sender, removed by the terminal lifecycle transition.
     pub(crate) send_chan: SharedCell<Option<mpsc::UnboundedSender<ws::v2::ClientMessage>>>,
 
     /// The client cache, which stores subscribed rows.
@@ -109,12 +140,13 @@ pub struct DbContextImpl<M: SpacetimeModule> {
 impl<M: SpacetimeModule> Clone for DbContextImpl<M> {
     fn clone(&self) -> Self {
         Self {
-            #[cfg(not(feature = "browser"))]
+            #[cfg(not(target_arch = "wasm32"))]
             runtime: self.runtime.clone(),
             // Being very explicit with `Arc::clone` here,
             // since we'll be doing `DbContextImpl::clone` very frequently,
             // and we need it to be fast.
             inner: Arc::clone(&self.inner),
+            connection_lifecycle: Arc::clone(&self.connection_lifecycle),
             send_chan: Arc::clone(&self.send_chan),
             cache: Arc::clone(&self.cache),
             recv: Arc::clone(&self.recv),
@@ -139,7 +171,7 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
         match msg {
             // Error: route as a connection error if we never finished connecting,
             // otherwise treat it as an erroneous disconnect.
-            ParsedMessage::Error(e) => Err(self.end_connection(Some(e))),
+            ParsedMessage::Error(error) => Err(self.end_connection(ConnectionEnd::TransportFailed(error))),
 
             // Initial `IdentityToken` message:
             // confirm that the received identity and connection ID are what we expect,
@@ -147,13 +179,11 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
             ParsedMessage::IdentityToken(identity, token, conn_id) => {
                 let on_connect = {
                     let mut inner = self.inner.lock().unwrap();
-                    match inner.connection_lifecycle {
-                        ConnectionLifecycle::Connecting => {
-                            inner.connection_lifecycle = ConnectionLifecycle::Connected;
-                            inner.on_connect.take()
-                        }
-                        ConnectionLifecycle::Connected => None,
-                        ConnectionLifecycle::Ended => return Ok(()),
+                    let mut lifecycle = lock_shared(&self.connection_lifecycle);
+                    match lifecycle.establish() {
+                        ConnectTransition::Established => inner.on_connect.take(),
+                        ConnectTransition::AlreadyConnected => None,
+                        ConnectTransition::AlreadyEnded => return Ok(()),
                     }
                 };
                 {
@@ -283,13 +313,20 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
                 Ok(())
             }
             ParsedMessage::ProcedureResult { request_id, result } => {
-                let ctx = self.make_event_ctx(());
-                self.inner
-                    .lock()
-                    .unwrap()
-                    .procedure_callbacks
-                    .resolve(&ctx, request_id, result);
-                Ok(())
+                let resolution = {
+                    let mut lifecycle = lock_shared(&self.connection_lifecycle);
+                    lifecycle.resolve(request_id)
+                };
+                match resolution {
+                    ProcedureResolution::Deliver(callback) => {
+                        callback(&self.make_event_ctx(()), result);
+                        Ok(())
+                    }
+                    ProcedureResolution::LateAfterEnd => Ok(()),
+                    ProcedureResolution::UnknownRequest => Err(self.end_connection(ConnectionEnd::TransportFailed(
+                        InternalError::new(format!("Procedure result for unknown request_id {request_id}")).into(),
+                    ))),
+                }
             }
         }
     }
@@ -299,60 +336,99 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
         update: M::DbUpdate,
         get_event: impl FnOnce(&mut DbContextImplInner<M>) -> Event<M::Reducer>,
     ) {
-        // Lock the client cache in a restricted scope,
-        // so that it will be unlocked when callbacks run.
         let applied_diff = {
             let mut cache = self.cache.lock().unwrap();
             update.apply_to_client_cache(&mut *cache)
         };
-        let mut inner = self.inner.lock().unwrap();
-
-        let event = get_event(&mut inner);
+        let (event, mut callbacks) = {
+            let mut inner = lock_shared(&self.inner);
+            let event = get_event(&mut inner);
+            let callbacks = std::mem::take(&mut inner.db_callbacks);
+            (event, callbacks)
+        };
         let row_event_ctx = self.make_event_ctx(event);
-        applied_diff.invoke_row_callbacks(&row_event_ctx, &mut inner.db_callbacks);
+        applied_diff.invoke_row_callbacks(&row_event_ctx, &mut callbacks);
+        lock_shared(&self.inner).db_callbacks.restore(callbacks);
     }
 
     /// Mark the connection lifecycle as ended, route the terminal event to the
     /// appropriate connection callback, and mark [`Self::is_active`] false.
     ///
     /// Returns the terminal error that should be returned from `advance_*` methods.
-    fn end_connection(&self, callback_error: Option<crate::Error>) -> crate::Error {
-        let mut inner = self.inner.lock().unwrap();
-        let return_error = callback_error.clone().unwrap_or(crate::Error::Disconnected);
-
-        let lifecycle = inner.connection_lifecycle;
-        if lifecycle == ConnectionLifecycle::Ended {
-            return return_error;
-        }
-        inner.connection_lifecycle = ConnectionLifecycle::Ended;
-
-        // Set `send_chan` to `None`, since `Self::is_active` checks that.
-        *self.send_chan.lock().unwrap() = None;
-
-        match lifecycle {
-            ConnectionLifecycle::Connecting => {
-                let callback_error = callback_error.unwrap_or_else(|| crate::Error::FailedToConnect {
-                    source: InternalError::new("Connection closed before receiving the initial connection message"),
-                });
-                let ctx: M::ErrorContext = self.make_event_ctx(Some(callback_error.clone()));
-                if let Some(connect_error_callback) = inner.on_connect_error.take() {
-                    connect_error_callback(&ctx, callback_error.clone());
-                }
-                callback_error
-            }
-            ConnectionLifecycle::Connected => {
-                let ctx: M::ErrorContext = self.make_event_ctx(callback_error.clone());
-                if let Some(disconnect_callback) = inner.on_disconnect.take() {
-                    disconnect_callback(&ctx, callback_error.clone());
-                }
-
-                // Call the `on_disconnect` method for all subscriptions.
-                inner.subscriptions.on_disconnect(&ctx);
-
+    fn end_connection(&self, end: ConnectionEnd) -> crate::Error {
+        let transition = {
+            let mut lifecycle = lock_shared(&self.connection_lifecycle);
+            lifecycle.terminate(end)
+        };
+        match transition {
+            TerminationTransition::Ended(termination) => {
+                let return_error = termination.end.return_error();
+                self.complete_termination(termination);
                 return_error
             }
-            ConnectionLifecycle::Ended => return_error,
+            TerminationTransition::AlreadyEnded(first_end) => first_end.return_error(),
         }
+    }
+
+    fn complete_termination(&self, termination: ConnectionTermination<ProcedureCallback<M>>) {
+        self.close_transport();
+        self.deliver_procedure_failures(termination.callbacks, &termination.end);
+        self.notify_disconnect(termination.notification);
+    }
+
+    fn notify_disconnect(&self, notification: ConnectionNotification) {
+        match notification {
+            ConnectionNotification::Suppressed => {}
+            ConnectionNotification::ConnectError(callback_error) => {
+                let callback = match self.inner.lock() {
+                    Ok(mut inner) => inner.on_connect_error.take(),
+                    Err(mut poisoned) => poisoned.get_mut().on_connect_error.take(),
+                };
+                match callback {
+                    Some(callback) => callback(&self.make_event_ctx(Some(callback_error.clone())), callback_error),
+                    None => {}
+                }
+            }
+            ConnectionNotification::Disconnected(public_error) => {
+                let ctx = self.make_event_ctx(public_error.clone());
+                let disconnect_callback = {
+                    let mut inner = match self.inner.lock() {
+                        Ok(inner) => inner,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    inner.subscriptions.on_disconnect(&ctx);
+                    inner.on_disconnect.take()
+                };
+                match disconnect_callback {
+                    Some(callback) => callback(&ctx, public_error),
+                    None => {}
+                }
+            }
+        }
+    }
+
+    fn close_transport(&self) {
+        let mut send_chan = match self.send_chan.lock() {
+            Ok(send_chan) => send_chan,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *send_chan = None;
+    }
+
+    fn deliver_procedure_failures(&self, callbacks: Vec<ProcedureCallback<M>>, end: &ConnectionEnd) {
+        let ctx = self.make_event_ctx(());
+        for callback in callbacks {
+            callback(&ctx, Err(end.callback_error()));
+        }
+    }
+
+    fn register_procedure_callback(
+        &self,
+        request_id: u32,
+        callback: ProcedureCallback<M>,
+    ) -> ProcedureRegistration<ProcedureCallback<M>> {
+        let mut lifecycle = lock_shared(&self.connection_lifecycle);
+        lifecycle.register(request_id, callback)
     }
 
     fn make_event_ctx<E, Ctx: AbstractEventContext<Module = M, Event = E>>(&self, event: E) -> Ctx {
@@ -362,7 +438,7 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
 
     /// Apply all queued [`PendingMutation`]s.
     fn apply_pending_mutations(&self) -> crate::Result<()> {
-        while let Ok(Some(pending_mutation)) = get_lock_sync(&self.pending_mutations_recv).try_next() {
+        while let Ok(pending_mutation) = try_recv_unbounded(&mut get_lock_sync(&self.pending_mutations_recv)) {
             self.apply_mutation(pending_mutation)?;
         }
 
@@ -373,6 +449,8 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
     fn apply_mutation(&self, mutation: PendingMutation<M>) -> crate::Result<()> {
         self.debug_log(|out| writeln!(out, "`apply_mutation`: {mutation:?}"));
         match mutation {
+            PendingMutation::NotifyDisconnect(notification) => self.notify_disconnect(notification),
+
             // Subscribe: register the subscription in the [`SubscriptionManager`]
             // and send the `Subscribe` WS message.
             PendingMutation::Subscribe { query_set_id, handle } => {
@@ -446,51 +524,43 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
                     .expect("Unable to send reducer call message: WS sender loop has dropped its recv channel");
             }
 
-            // Invoke a procedure: stash its callback, then send the `CallProcedure` WS message.
-            PendingMutation::InvokeProcedureWithCallback {
+            PendingMutation::InvokeProcedure {
+                request_id,
                 procedure,
                 args,
-                callback,
             } => {
-                // We need to include a request_id in the message so that we can find the callback once it completes.
-                let request_id = next_request_id();
-                self.inner
-                    .lock()
-                    .unwrap()
-                    .procedure_callbacks
-                    .insert(request_id, callback);
-
                 let msg = ws::v2::ClientMessage::CallProcedure(ws::v2::CallProcedure {
                     procedure: procedure.into(),
                     args: args.into(),
                     request_id,
                     flags: ws::v2::CallProcedureFlags::Default,
                 });
-                self.send_chan
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .ok_or(crate::Error::Disconnected)?
-                    .unbounded_send(msg)
-                    .expect("Unable to send procedure call message: WS sender loop has dropped its recv channel");
-            }
-
-            // Disconnect: close the connection.
-            PendingMutation::Disconnect => {
-                {
-                    let mut inner = self.inner.lock().unwrap();
-                    if inner.connection_lifecycle == ConnectionLifecycle::Connecting {
-                        // If the user cancels before the initial connection finishes,
-                        // don't report that as a connection error.
-                        inner.connection_lifecycle = ConnectionLifecycle::Ended;
+                let send = {
+                    let mut send_chan = match self.send_chan.lock() {
+                        Ok(send_chan) => send_chan,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    match send_chan.as_mut() {
+                        Some(sender) => match sender.unbounded_send(msg) {
+                            Ok(()) => ProcedureSend::Sent,
+                            Err(error) => ProcedureSend::Failed(error.into_send_error()),
+                        },
+                        None => ProcedureSend::Unavailable,
+                    }
+                };
+                match send {
+                    ProcedureSend::Sent => {}
+                    ProcedureSend::Unavailable => {
+                        return Err(self.end_connection(ConnectionEnd::TransportFailed(crate::Error::Disconnected)))
+                    }
+                    ProcedureSend::Failed(source) => {
+                        return Err(self.end_connection(ConnectionEnd::TransportFailed(
+                            InternalError::new("Failed to queue procedure call for WebSocket transport")
+                                .with_cause(source)
+                                .into(),
+                        )))
                     }
                 }
-                // Set `send_chan` to `None`, since `Self::is_active` checks that.
-                // This will close the WebSocket loop in websocket.rs,
-                // sending a close frame to the server,
-                // eventually resulting in disconnect callbacks being called
-                // if the initial connection had completed.
-                *self.send_chan.lock().unwrap() = None;
             }
 
             // Callback stuff: these all do what you expect.
@@ -567,21 +637,13 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
         // so that pending callbacks don't get skipped.
         self.apply_pending_mutations()?;
 
-        // Deranged behavior: mpsc's `try_next` returns `Ok(None)` when the channel is closed,
-        // and `Err(_)` when the channel is open and waiting. This seems exactly backwards.
-        //
-        // NOTE(cloutiertyler): A comment on the deranged behavior: the mental
-        // model is that of an iterator, but for a stream instead. i.e. you pull
-        // off of an iterator until it returns `None`, which means that the
-        // iterator is exhausted. If you try to pull off the iterator and
-        // there's nothing there but it's not exhausted, it (arguably sensibly)
-        // returns `Err(_)`. Similar behavior as `Iterator::next` and
-        // `Stream::poll_next`. No comment on whether this is a good mental
-        // model or not.
-        let res = match get_lock_sync(&self.recv).try_next() {
-            Ok(None) => Err(self.end_connection(None)),
-            Err(_) => Ok(false),
-            Ok(Some(msg)) => self.process_message(msg).map(|_| true),
+        // `try_recv_unbounded` returns `Ok(msg)` when a message is available,
+        // `Err(ChannelTryRecvError::Empty)` when the channel is open but no messages are ready,
+        // and `Err(ChannelTryRecvError::Closed)` when the sender has been dropped.
+        let res = match try_recv_unbounded(&mut get_lock_sync(&self.recv)) {
+            Err(ChannelTryRecvError::Closed) => Err(self.end_connection(ConnectionEnd::TransportClosed)),
+            Err(ChannelTryRecvError::Empty) => Ok(false),
+            Ok(msg) => self.process_message(msg).map(|_| true),
         };
 
         // Also apply any new pending messages afterwards,
@@ -605,17 +667,17 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
         // This may be unnecessary, but `tokio::select` does not document any ordering guarantees,
         // and if both `pending_mutations.next()` and `recv.next()` have values ready,
         // we want to process the pending mutation first.
-        if let Ok(pending_mutation) = pending_mutations.try_next() {
-            return Message::Local(pending_mutation.unwrap());
+        if let Ok(pending_mutation) = try_recv_unbounded(&mut pending_mutations) {
+            return Message::Local(pending_mutation);
         }
 
-        #[cfg(not(feature = "browser"))]
+        #[cfg(not(target_arch = "wasm32"))]
         tokio::select! {
             pending_mutation = pending_mutations.next() => Message::Local(pending_mutation.unwrap()),
             incoming_message = recv.next() => Message::Ws(incoming_message),
         }
 
-        #[cfg(feature = "browser")]
+        #[cfg(target_arch = "wasm32")]
         {
             let (pending_fut, recv_fut) = (pending_mutations.next().fuse(), recv.next().fuse());
             pin_mut!(pending_fut, recv_fut);
@@ -630,11 +692,11 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
     /// Like [`Self::advance_one_message`], but sleeps the thread until a message is available.
     ///
     /// Called by the autogenerated `DbConnection` method of the same name.
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn advance_one_message_blocking(&self) -> crate::Result<()> {
         match self.runtime.block_on(self.get_message()) {
             Message::Local(pending) => self.apply_mutation(pending),
-            Message::Ws(None) => Err(self.end_connection(None)),
+            Message::Ws(None) => Err(self.end_connection(ConnectionEnd::TransportClosed)),
             Message::Ws(Some(msg)) => self.process_message(msg),
         }
     }
@@ -645,7 +707,7 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
     pub async fn advance_one_message_async(&self) -> crate::Result<()> {
         match self.get_message().await {
             Message::Local(pending) => self.apply_mutation(pending),
-            Message::Ws(None) => Err(self.end_connection(None)),
+            Message::Ws(None) => Err(self.end_connection(ConnectionEnd::TransportClosed)),
             Message::Ws(Some(msg)) => self.process_message(msg),
         }
     }
@@ -661,7 +723,7 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
     /// Spawn a thread which does [`Self::advance_one_message_blocking`] in a loop.
     ///
     /// Called by the autogenerated `DbConnection` method of the same name.
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn run_threaded(&self) -> std::thread::JoinHandle<()> {
         let this = self.clone();
         std::thread::spawn(move || loop {
@@ -676,7 +738,7 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
     /// Spawn a background task which does [`Self::advance_one_message_async`] in a loop.
     ///
     /// Called by the autogenerated `DbConnection` method of the same name.
-    #[cfg(feature = "browser")]
+    #[cfg(target_arch = "wasm32")]
     pub fn run_background_task(&self) {
         let this = self.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -706,18 +768,30 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
 
     /// Called by the autogenerated `DbConnection` method of the same name.
     pub fn is_active(&self) -> bool {
-        self.send_chan.lock().unwrap().is_some()
+        let lifecycle = lock_shared(&self.connection_lifecycle);
+        match lifecycle.activity() {
+            ConnectionActivity::Active => true,
+            ConnectionActivity::Ended => false,
+        }
     }
 
     /// Called by the autogenerated `DbConnection` method of the same name.
     pub fn disconnect(&self) -> crate::Result<()> {
-        if !self.is_active() {
-            return Err(crate::Error::Disconnected);
+        let transition = {
+            let mut lifecycle = lock_shared(&self.connection_lifecycle);
+            lifecycle.request_disconnect()
+        };
+        match transition {
+            RequestedDisconnect::Accepted(termination) => {
+                self.close_transport();
+                self.deliver_procedure_failures(termination.callbacks, &termination.end);
+                let _ = self
+                    .pending_mutations_send
+                    .unbounded_send(PendingMutation::NotifyDisconnect(termination.notification));
+                Ok(())
+            }
+            RequestedDisconnect::AlreadyEnded => Err(crate::Error::Disconnected),
         }
-        self.pending_mutations_send
-            .unbounded_send(PendingMutation::Disconnect)
-            .unwrap();
-        Ok(())
     }
 
     /// Add a [`PendingMutation`] to the `pending_mutations` queue,
@@ -788,19 +862,64 @@ impl<M: SpacetimeModule> DbContextImpl<M> {
             + Send
             + 'static,
     ) {
-        self.queue_mutation(PendingMutation::InvokeProcedureWithCallback {
-            procedure: procedure_name,
-            args: bsatn::to_vec(&args).expect("Failed to BSATN serialize procedure args"),
-            callback: Box::new(move |ctx, ret| {
+        let args = match bsatn::to_vec(&args) {
+            Ok(args) => args,
+            Err(source) => {
+                callback(
+                    &self.make_event_ctx(()),
+                    Err(
+                        InternalError::failed_parse(std::any::type_name::<Args>(), "procedure arguments")
+                            .with_cause(source),
+                    ),
+                );
+                return;
+            }
+        };
+        let request_id = next_request_id();
+        let callback = Box::new(
+            move |ctx: &M::ProcedureEventContext, result: Result<Bytes, InternalError>| {
                 callback(
                     ctx,
-                    ret.map(|ret| {
-                        bsatn::from_slice::<RetVal>(&ret[..])
-                            .expect("Failed to BSATN deserialize procedure return value")
+                    result.and_then(|bytes| {
+                        bsatn::from_slice::<RetVal>(&bytes).map_err(|source| {
+                            InternalError::failed_parse(std::any::type_name::<RetVal>(), "procedure return value")
+                                .with_cause(source)
+                        })
                     }),
                 )
-            }),
-        });
+            },
+        );
+        let registration = self.register_procedure_callback(request_id, callback);
+        match registration {
+            ProcedureRegistration::Stored => {}
+            ProcedureRegistration::RejectedAfterEnd { callback, end } => {
+                callback(&self.make_event_ctx(()), Err(end.callback_error()));
+                return;
+            }
+            ProcedureRegistration::DuplicateRequestId(callback) => {
+                let error = InternalError::new(format!("Duplicate procedure request_id {request_id}"));
+                callback(&self.make_event_ctx(()), Err(error.clone()));
+                let _ = self.end_connection(ConnectionEnd::TransportFailed(error.into()));
+                return;
+            }
+        }
+
+        match self
+            .pending_mutations_send
+            .unbounded_send(PendingMutation::InvokeProcedure {
+                request_id,
+                procedure: procedure_name,
+                args,
+            }) {
+            Ok(()) => {}
+            Err(error) => {
+                let _ = self.end_connection(ConnectionEnd::TransportFailed(
+                    InternalError::new("Failed to queue procedure call mutation")
+                        .with_cause(error.into_send_error())
+                        .into(),
+                ));
+            }
+        }
     }
 }
 
@@ -811,34 +930,21 @@ type OnConnectErrorCallback<M> = Box<dyn FnOnce(&<M as SpacetimeModule>::ErrorCo
 type OnDisconnectCallback<M> =
     Box<dyn FnOnce(&<M as SpacetimeModule>::ErrorContext, Option<crate::Error>) + Send + 'static>;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ConnectionLifecycle {
-    /// Waiting for the server's initial connection message.
-    Connecting,
-    /// The server has sent the initial connection message.
-    Connected,
-    /// The connection has already reached a terminal lifecycle state.
-    Ended,
-}
-
 /// All the stuff in a [`DbContextImpl`] which can safely be locked while invoking callbacks.
 pub(crate) struct DbContextImplInner<M: SpacetimeModule> {
     /// `Some` if not within the context of an outer runtime. The `Runtime` must
     /// then live as long as `Self`.
     #[allow(unused)]
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     runtime: Option<Runtime>,
 
     db_callbacks: DbCallbacks<M>,
     reducer_callbacks: ReducerCallbacks<M>,
     pub(crate) subscriptions: SubscriptionManager<M>,
 
-    connection_lifecycle: ConnectionLifecycle,
     on_connect: Option<OnConnectCallback<M>>,
     on_connect_error: Option<OnConnectErrorCallback<M>>,
     on_disconnect: Option<OnDisconnectCallback<M>>,
-
-    procedure_callbacks: ProcedureCallbacks<M>,
 }
 
 /// A builder-pattern constructor for a `DbConnection` connection to the module `M`.
@@ -947,13 +1053,13 @@ You must explicitly advance the connection by calling any one of:
 Which of these methods you should call depends on the specific needs of your application,
 but you must call one of them, or else the connection will never progress.
 "]
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build(self) -> crate::Result<M::DbConnection> {
         let imp = self.build_impl()?;
         Ok(<M::DbConnection as DbConnection>::new(imp))
     }
 
-    #[cfg(feature = "browser")]
+    #[cfg(target_arch = "wasm32")]
     pub async fn build(self) -> crate::Result<M::DbConnection> {
         let imp = self.build_impl().await?;
         Ok(<M::DbConnection as DbConnection>::new(imp))
@@ -961,7 +1067,7 @@ but you must call one of them, or else the connection will never progress.
 
     /// Open a WebSocket connection, build an empty client cache, &c,
     /// to construct a [`DbContextImpl`].
-    #[cfg(not(feature = "browser"))]
+    #[cfg(not(target_arch = "wasm32"))]
     fn build_impl(self) -> crate::Result<DbContextImpl<M>> {
         let extra_logging = self
             .additional_logging_path
@@ -1013,7 +1119,7 @@ but you must call one of them, or else the connection will never progress.
 
     /// Open a WebSocket connection, build an empty client cache, &c,
     /// to construct a [`DbContextImpl`].
-    #[cfg(feature = "browser")]
+    #[cfg(target_arch = "wasm32")]
     async fn build_impl(self) -> crate::Result<DbContextImpl<M>> {
         // The wasm/browser SDK target runs under `wasm32-unknown-unknown`, where we do not
         // have the native file APIs that back `with_debug_to_file`. Keeping the
@@ -1195,33 +1301,30 @@ Instead of registering multiple `on_disconnect` callbacks, register a single cal
 
 /// Create a [`DbContextImplInner`] wrapped in `Arc<Mutex<...>>`.
 fn build_db_ctx_inner<M: SpacetimeModule>(
-    #[cfg(not(feature = "browser"))] runtime: Option<Runtime>,
+    #[cfg(not(target_arch = "wasm32"))] runtime: Option<Runtime>,
 
     on_connect_cb: Option<OnConnectCallback<M>>,
     on_connect_error_cb: Option<OnConnectErrorCallback<M>>,
     on_disconnect_cb: Option<OnDisconnectCallback<M>>,
 ) -> Arc<StdMutex<DbContextImplInner<M>>> {
     Arc::new(StdMutex::new(DbContextImplInner {
-        #[cfg(not(feature = "browser"))]
+        #[cfg(not(target_arch = "wasm32"))]
         runtime,
 
         db_callbacks: DbCallbacks::default(),
         reducer_callbacks: ReducerCallbacks::default(),
         subscriptions: SubscriptionManager::default(),
 
-        connection_lifecycle: ConnectionLifecycle::Connecting,
         on_connect: on_connect_cb,
         on_connect_error: on_connect_error_cb,
         on_disconnect: on_disconnect_cb,
-
-        procedure_callbacks: ProcedureCallbacks::default(),
     }))
 }
 
 #[allow(clippy::too_many_arguments)]
 /// Assemble and return a [`DbContextImpl`] from the provided [`DbContextImplInner`], and channels.
 fn build_db_ctx<M: SpacetimeModule>(
-    #[cfg(not(feature = "browser"))] runtime_handle: runtime::Handle,
+    #[cfg(not(target_arch = "wasm32"))] runtime_handle: runtime::Handle,
 
     inner_ctx: Arc<StdMutex<DbContextImplInner<M>>>,
     raw_msg_send: mpsc::UnboundedSender<ws::v2::ClientMessage>,
@@ -1236,9 +1339,10 @@ fn build_db_ctx<M: SpacetimeModule>(
     let cache = Arc::new(StdMutex::new(cache));
 
     DbContextImpl {
-        #[cfg(not(feature = "browser"))]
+        #[cfg(not(target_arch = "wasm32"))]
         runtime: runtime_handle,
         inner: inner_ctx,
+        connection_lifecycle: Arc::new(StdMutex::new(ConnectionLifecycle::default())),
         send_chan: Arc::new(StdMutex::new(Some(raw_msg_send))),
         cache,
         recv: parsed_msg_recv,
@@ -1253,7 +1357,7 @@ fn build_db_ctx<M: SpacetimeModule>(
 // When called from within an async context, return a handle to it (and no
 // `Runtime`), otherwise create a fresh `Runtime` and return it along with a
 // handle to it.
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn enter_or_create_runtime() -> crate::Result<(Option<Runtime>, runtime::Handle)> {
     match runtime::Handle::try_current() {
         Err(e) if e.is_missing_context() => {
@@ -1277,25 +1381,25 @@ fn enter_or_create_runtime() -> crate::Result<(Option<Runtime>, runtime::Handle)
 }
 
 /// Synchronous lock helper: native = blocking_lock, browser = lock().unwrap()
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn get_lock_sync<T>(mutex: &TokioMutex<T>) -> tokio::sync::MutexGuard<'_, T> {
     mutex.blocking_lock()
 }
 
 /// Synchronous lock helper: native = blocking_lock, browser = lock().unwrap()
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 fn get_lock_sync<T>(mutex: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap()
 }
 
 /// Async‐lock helper: native = .lock().await, browser = lock().unwrap() inside async fn
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 async fn get_lock_async<T>(mutex: &TokioMutex<T>) -> tokio::sync::MutexGuard<'_, T> {
     mutex.lock().await
 }
 
 /// Async‐lock helper: native = .lock().await, browser = lock().unwrap() inside async fn
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 pub async fn get_lock_async<T>(mutex: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
     // still async, but does the sync lock immediately
     mutex.lock().unwrap()
@@ -1329,7 +1433,7 @@ enum ParsedMessage<M: SpacetimeModule> {
     },
 }
 
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn spawn_parse_loop<M: SpacetimeModule>(
     raw_message_recv: mpsc::UnboundedReceiver<ws::v2::ServerMessage>,
     handle: &runtime::Handle,
@@ -1340,7 +1444,7 @@ fn spawn_parse_loop<M: SpacetimeModule>(
     (handle, parsed_message_recv)
 }
 
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 fn spawn_parse_loop<M: SpacetimeModule>(
     raw_message_recv: mpsc::UnboundedReceiver<ws::v2::ServerMessage>,
     extra_logging: Option<SharedCell<File>>,
@@ -1501,6 +1605,7 @@ async fn parse_loop<M: SpacetimeModule>(
 
 /// Operations a user can make to a `DbContext` which must be postponed
 pub(crate) enum PendingMutation<M: SpacetimeModule> {
+    NotifyDisconnect(ConnectionNotification),
     Unsubscribe {
         query_set_id: QuerySetId,
     },
@@ -1535,15 +1640,14 @@ pub(crate) enum PendingMutation<M: SpacetimeModule> {
         table: &'static str,
         callback_id: CallbackId,
     },
-    Disconnect,
     InvokeReducerWithCallback {
         reducer: M::Reducer,
         callback: ReducerCallback<M>,
     },
-    InvokeProcedureWithCallback {
+    InvokeProcedure {
+        request_id: u32,
         procedure: &'static str,
         args: Vec<u8>,
-        callback: ProcedureCallback<M>,
     },
 }
 
@@ -1551,6 +1655,7 @@ pub(crate) enum PendingMutation<M: SpacetimeModule> {
 impl<M: SpacetimeModule> std::fmt::Debug for PendingMutation<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
+            PendingMutation::NotifyDisconnect(_) => write!(f, "PendingMutation::NotifyDisconnect"),
             PendingMutation::Unsubscribe { query_set_id } => f
                 .debug_struct("PendingMutation::Unsubscribe")
                 .field("query_set_id", query_set_id)
@@ -1589,18 +1694,28 @@ impl<M: SpacetimeModule> std::fmt::Debug for PendingMutation<M> {
                 .field("table", table)
                 .field("callback_id", callback_id)
                 .finish(),
-            PendingMutation::Disconnect => write!(f, "PendingMutation::Disconnect"),
             PendingMutation::InvokeReducerWithCallback { reducer, .. } => f
                 .debug_struct("PendingMutation::InvokeReducerWithCallback")
                 .field("reducer", reducer)
                 .finish_non_exhaustive(),
-            PendingMutation::InvokeProcedureWithCallback { procedure, args, .. } => f
-                .debug_struct("PendingMutation::InvokeProcedureWithCallback")
+            PendingMutation::InvokeProcedure {
+                request_id,
+                procedure,
+                args,
+            } => f
+                .debug_struct("PendingMutation::InvokeProcedure")
+                .field("request_id", request_id)
                 .field("procedure", procedure)
                 .field("args", args)
                 .finish_non_exhaustive(),
         }
     }
+}
+
+enum ProcedureSend {
+    Sent,
+    Unavailable,
+    Failed(mpsc::SendError),
 }
 
 enum Message<M: SpacetimeModule> {

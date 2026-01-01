@@ -12,7 +12,6 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const WASM_BINDGEN_VERSION = 'wasm-bindgen 0.2.104';
 const OUTPUT_NAME = 'spacetimedb_portable_datastore_wasm';
 const OUTPUT_FILES = [
   `${OUTPUT_NAME}.cjs`,
@@ -42,6 +41,12 @@ function run(command, args, options = {}) {
   });
 }
 
+const WASM_BINDGEN_VERSION = `wasm-bindgen ${run(
+  'python3',
+  ['scripts/wasm-bindgen-version.py', 'Cargo.lock'],
+  { capture: true }
+).trim()}`;
+
 let installedVersion;
 try {
   installedVersion = run('wasm-bindgen', ['--version'], {
@@ -63,7 +68,11 @@ const tempDir = mkdtempSync(join(tmpdir(), 'spacetimedb-test-utils-wasm-'));
 try {
   const cargoTargetDir = cleanBuild
     ? resolve(tempDir, 'target')
-    : resolve(workspaceRoot, 'target/test-utils-wasm');
+    : resolve(
+        workspaceRoot,
+        process.env.CARGO_TARGET_DIR ?? 'target',
+        'test-utils-wasm'
+      );
   const generatedDir = resolve(tempDir, 'generated');
   const buildArtifact = resolve(
     cargoTargetDir,

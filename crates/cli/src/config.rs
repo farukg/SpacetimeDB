@@ -1,5 +1,5 @@
 use crate::errors::CliError;
-use crate::util::{contains_protocol, host_or_url_to_host_and_protocol};
+use crate::server_url::{contains_protocol, host_or_url_to_host_and_protocol, url_to_host_and_protocol};
 use anyhow::Context;
 use jsonwebtoken::DecodingKey;
 use spacetimedb_data_structures::map::HashMap;
@@ -55,10 +55,9 @@ impl ServerConfig {
     }
 
     pub fn nick_or_host_or_url_is(&self, name: &str) -> bool {
-        self.nickname.as_deref() == Some(name) || self.host == name || {
-            let (host, _) = host_or_url_to_host_and_protocol(name);
-            self.host == host
-        }
+        self.nickname.as_deref() == Some(name)
+            || self.host == name
+            || host_or_url_to_host_and_protocol(name).is_ok_and(|(host, _)| self.host == host)
     }
 }
 
@@ -518,7 +517,7 @@ impl Config {
     /// Callers should call `Config::save` afterwards
     /// to ensure modifications are persisted to disk.
     pub fn set_default_server(&mut self, nickname_or_host_or_url: &str) -> anyhow::Result<()> {
-        let (host, _) = host_or_url_to_host_and_protocol(nickname_or_host_or_url);
+        let (host, _) = host_or_url_to_host_and_protocol(nickname_or_host_or_url)?;
         self.home.set_default_server(host)
     }
 
@@ -531,7 +530,7 @@ impl Config {
     /// Callers should call `Config::save` afterwards
     /// to ensure modifications are persisted to disk.
     pub fn remove_server(&mut self, nickname_or_host_or_url: &str) -> anyhow::Result<()> {
-        let (host, _) = host_or_url_to_host_and_protocol(nickname_or_host_or_url);
+        let (host, _) = host_or_url_to_host_and_protocol(nickname_or_host_or_url)?;
         self.home.remove_server(host)
     }
 
@@ -569,7 +568,7 @@ impl Config {
     pub fn host<'a>(&'a self, server: Option<&'a str>) -> anyhow::Result<&'a str> {
         if let Some(server) = server {
             if contains_protocol(server) {
-                Ok(host_or_url_to_host_and_protocol(server).0)
+                Ok(url_to_host_and_protocol(server)?.0)
             } else {
                 self.home.host(server)
             }
@@ -595,7 +594,7 @@ impl Config {
     pub fn protocol<'a>(&'a self, server: Option<&'a str>) -> anyhow::Result<&'a str> {
         if let Some(server) = server {
             if contains_protocol(server) {
-                Ok(host_or_url_to_host_and_protocol(server).1.unwrap())
+                Ok(url_to_host_and_protocol(server)?.1)
             } else {
                 self.home.protocol(server)
             }
@@ -766,7 +765,7 @@ Update the server's fingerprint with:
 
     pub fn server_nick_or_host<'a>(&'a self, server: Option<&'a str>) -> anyhow::Result<&'a str> {
         if let Some(server) = server {
-            let (host, _) = host_or_url_to_host_and_protocol(server);
+            let (host, _) = host_or_url_to_host_and_protocol(server)?;
             Ok(host)
         } else {
             self.home.default_server().map(ServerConfig::nick_or_host)
@@ -775,7 +774,7 @@ Update the server's fingerprint with:
 
     pub fn server_fingerprint(&self, server: Option<&str>) -> anyhow::Result<Option<&str>> {
         if let Some(server) = server {
-            let (host, _) = host_or_url_to_host_and_protocol(server);
+            let (host, _) = host_or_url_to_host_and_protocol(server)?;
             self.home.server_fingerprint(host)
         } else {
             self.home.default_server_fingerprint()
@@ -784,7 +783,7 @@ Update the server's fingerprint with:
 
     pub fn set_server_fingerprint(&mut self, server: Option<&str>, new_fingerprint: String) -> anyhow::Result<()> {
         if let Some(server) = server {
-            let (host, _) = host_or_url_to_host_and_protocol(server);
+            let (host, _) = host_or_url_to_host_and_protocol(server)?;
             self.home.set_server_fingerprint(host, new_fingerprint)
         } else {
             self.home.set_default_server_fingerprint(new_fingerprint)
@@ -798,13 +797,13 @@ Update the server's fingerprint with:
         new_host: Option<&str>,
         new_protocol: Option<&str>,
     ) -> anyhow::Result<(Option<String>, Option<String>, Option<String>)> {
-        let (host, _) = host_or_url_to_host_and_protocol(server);
+        let (host, _) = host_or_url_to_host_and_protocol(server)?;
         self.home.edit_server(host, new_nickname, new_host, new_protocol)
     }
 
     pub fn delete_server_fingerprint(&mut self, server: Option<&str>) -> anyhow::Result<()> {
         if let Some(server) = server {
-            let (host, _) = host_or_url_to_host_and_protocol(server);
+            let (host, _) = host_or_url_to_host_and_protocol(server)?;
             self.home.delete_server_fingerprint(host)
         } else {
             self.home.delete_default_server_fingerprint()

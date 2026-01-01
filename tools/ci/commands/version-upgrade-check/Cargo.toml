@@ -7,3 +7,6 @@ edition.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 duct.workspace = true
+
+[lints]
+workspace = true

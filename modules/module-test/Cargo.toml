@@ -19,3 +19,6 @@ spacetimedb = { path = "../../crates/bindings", features = ["unstable"] }
 
 anyhow.workspace = true
 log.workspace = true
+
+[lints]
+workspace = true

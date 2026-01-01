@@ -18,7 +18,11 @@ impl ModuleLanguage for Artifact {
         static MODULE: OnceLock<CompiledModule> = OnceLock::new();
         MODULE.get_or_init(|| {
             let path = PathBuf::from(std::env::var_os("CSHARP_BENCH_WASM").expect("set CSHARP_BENCH_WASM"));
-            CompiledModule::from_artifact("benchmarks-cs", spacetimedb::messages::control_db::HostType::Wasm, path)
+            CompiledModule::from_artifact(
+                "benchmarks-cs",
+                spacetimedb_core::messages::control_db::HostType::Wasm,
+                path,
+            )
         })
     }
 }

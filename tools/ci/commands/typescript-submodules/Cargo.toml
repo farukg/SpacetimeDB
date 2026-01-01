@@ -7,3 +7,6 @@ edition.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 ci-common = { path = "../../common" }
+
+[lints]
+workspace = true

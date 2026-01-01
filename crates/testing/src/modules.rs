@@ -9,13 +9,13 @@ use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
 use futures::{FutureExt as _, TryStreamExt as _};
-use spacetimedb::config::CertificateAuthority;
-use spacetimedb::host::ModuleHost;
-use spacetimedb::messages::control_db::HostType;
-use spacetimedb::util::jobs::JobCores;
-use spacetimedb::Identity;
 use spacetimedb_client_api::auth::SpacetimeAuth;
 use spacetimedb_client_api::routes::subscribe::{generate_random_connection_id, WebSocketOptions};
+use spacetimedb_core::config::CertificateAuthority;
+use spacetimedb_core::host::ModuleHost;
+use spacetimedb_core::messages::control_db::HostType;
+use spacetimedb_core::util::jobs::JobCores;
+use spacetimedb_core::Identity;
 use spacetimedb_lib::environment::{EnvironmentRemove, EnvironmentUpdate};
 use spacetimedb_lib::http as st_http;
 use spacetimedb_lib::AlgebraicValue;
@@ -24,20 +24,20 @@ use spacetimedb_schema::auto_migrate::MigrationPolicy;
 use spacetimedb_schema::def::ModuleDef;
 use tokio::runtime::{Builder, Runtime};
 
-use spacetimedb::client::messages::SerializableMessage;
-use spacetimedb::client::{
-    ClientActorId, ClientConfig, ClientConnection, ClientConnectionReceiver, DataMessage, OutboundMessage,
-};
-use spacetimedb::db::{Config, Storage};
-use spacetimedb::host::module_host::EventStatus;
-use spacetimedb::host::FunctionArgs;
-use spacetimedb::host::ReducerCallResult;
 use spacetimedb_client_api::{ControlStateReadAccess, ControlStateWriteAccess, DatabaseDef, NodeDelegate};
 use spacetimedb_client_api_messages::websocket::v1 as ws_v1;
+use spacetimedb_core::client::messages::SerializableMessage;
+use spacetimedb_core::client::{
+    ClientActorId, ClientConfig, ClientConnection, ClientConnectionReceiver, DataMessage, OutboundMessage,
+};
+use spacetimedb_core::db::{Config, Storage};
+use spacetimedb_core::host::module_host::EventStatus;
+use spacetimedb_core::host::FunctionArgs;
+use spacetimedb_core::host::ReducerCallResult;
 use spacetimedb_lib::identity::RequestId;
 use spacetimedb_lib::{bsatn, sats};
 
-pub use spacetimedb::database_logger::LogLevel;
+pub use spacetimedb_core::database_logger::LogLevel;
 
 use spacetimedb_standalone::StandaloneEnv;
 
@@ -77,7 +77,7 @@ impl ModuleHandle {
     pub async fn republish_environment(
         &self,
         environment: BTreeMap<String, String>,
-    ) -> anyhow::Result<spacetimedb::host::UpdateDatabaseResult> {
+    ) -> anyhow::Result<spacetimedb_core::host::UpdateDatabaseResult> {
         let program = self
             .client
             .module()
@@ -94,7 +94,7 @@ impl ModuleHandle {
         program_bytes: Bytes,
         host_type: HostType,
         environment: BTreeMap<String, String>,
-    ) -> anyhow::Result<spacetimedb::host::UpdateDatabaseResult> {
+    ) -> anyhow::Result<spacetimedb_core::host::UpdateDatabaseResult> {
         self.env
             .publish_database(
                 &Identity::ZERO,
@@ -326,7 +326,7 @@ impl CompiledModule {
     pub async fn extract_schema(&self) -> ModuleDef {
         // TODO: extract_schema should accept &[u8]
         let boxed_bytes: Box<[u8]> = self.program_bytes()[..].into();
-        spacetimedb::host::extract_schema(boxed_bytes, self.host_type)
+        spacetimedb_core::host::extract_schema(boxed_bytes, self.host_type)
             .await
             .unwrap()
     }

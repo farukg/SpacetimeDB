@@ -31,18 +31,6 @@ use http::StatusCode;
 use http_body_util::BodyExt;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
-use spacetimedb::auth::identity::ConnectionAuthCtx;
-use spacetimedb::database_logger::DatabaseLogger;
-use spacetimedb::host::module_host::{
-    ClientConnectedError, DurabilityExited, DurableOffset, TransactionOffset, UpdateEnvironmentResult,
-    TRANSACTION_CONFIRMATION_TIMEOUT,
-};
-use spacetimedb::host::{CallResult, UpdateDatabaseResult};
-use spacetimedb::host::{FunctionArgs, MigratePlanResult};
-use spacetimedb::host::{IdcDeliveryFailure, IdcReducerCallOutcome, ProcedureCallError, ReducerCallError};
-use spacetimedb::host::{ModuleHost, ReducerCallResult, ReducerCallResultWithTxOffset, ReducerOutcome};
-use spacetimedb::identity::Identity;
-use spacetimedb::messages::control_db::{Database, HostType};
 use spacetimedb_client_api_messages::http::SqlStmtResult;
 use spacetimedb_client_api_messages::idc::{IdcDeliveryError, IdcResponse};
 use spacetimedb_client_api_messages::name::{
@@ -50,6 +38,18 @@ use spacetimedb_client_api_messages::name::{
     PrePublishAutoMigrateResult, PrePublishManualMigrateResult, PrePublishResult, PrettyPrintStyle, PublishOp,
     PublishResult,
 };
+use spacetimedb_core::auth::identity::ConnectionAuthCtx;
+use spacetimedb_core::database_logger::DatabaseLogger;
+use spacetimedb_core::host::module_host::{
+    ClientConnectedError, DurabilityExited, DurableOffset, TransactionOffset, UpdateEnvironmentResult,
+    TRANSACTION_CONFIRMATION_TIMEOUT,
+};
+use spacetimedb_core::host::{CallResult, UpdateDatabaseResult};
+use spacetimedb_core::host::{FunctionArgs, MigratePlanResult};
+use spacetimedb_core::host::{IdcDeliveryFailure, IdcReducerCallOutcome, ProcedureCallError, ReducerCallError};
+use spacetimedb_core::host::{ModuleHost, ReducerCallResult, ReducerCallResultWithTxOffset, ReducerOutcome};
+use spacetimedb_core::identity::Identity;
+use spacetimedb_core::messages::control_db::{Database, HostType};
 use spacetimedb_datastore::db_metrics::DB_METRICS;
 use spacetimedb_datastore::system_tables::StInboundMsgResultStatus;
 use spacetimedb_lib::db::raw_def::v10::RawModuleDefV10;
@@ -278,8 +278,8 @@ async fn confirm_reducer_call(
 }
 
 async fn confirm_call_offset(
-    offset: Option<spacetimedb::subscription::module_subscription_manager::TransactionOffset>,
-    durable: Option<spacetimedb::host::module_host::DurableOffset>,
+    offset: Option<spacetimedb_core::subscription::module_subscription_manager::TransactionOffset>,
+    durable: Option<spacetimedb_core::host::module_host::DurableOffset>,
 ) -> axum::response::Result<()> {
     if let (Some(offset), Some(mut durable)) = (offset, durable) {
         timeout(TRANSACTION_CONFIRMATION_TIMEOUT, async {
@@ -476,13 +476,13 @@ async fn handle_http_route_impl<S: ControlStateDelegate + NodeDelegate>(
         .await
     {
         Ok(response) => response,
-        Err(spacetimedb::host::module_host::HttpHandlerCallError::NoSuchHandler) => {
+        Err(spacetimedb_core::host::module_host::HttpHandlerCallError::NoSuchHandler) => {
             return Ok((StatusCode::NOT_FOUND, NO_SUCH_ROUTE).into_response());
         }
-        Err(spacetimedb::host::module_host::HttpHandlerCallError::NoSuchModule(_)) => {
+        Err(spacetimedb_core::host::module_host::HttpHandlerCallError::NoSuchModule(_)) => {
             return Err(NO_SUCH_DATABASE.into());
         }
-        Err(spacetimedb::host::module_host::HttpHandlerCallError::InternalError(err)) => {
+        Err(spacetimedb_core::host::module_host::HttpHandlerCallError::InternalError(err)) => {
             return Err((StatusCode::INTERNAL_SERVER_ERROR, err).into());
         }
     };
@@ -805,7 +805,7 @@ impl From<Database> for DatabaseResponse {
 
 fn extract_environment_error(mut error: &anyhow::Error) -> Option<axum::response::Result<EnvironmentPublishError>> {
     // TODO(noa): clean up these errors my g-d this is bad
-    use spacetimedb::host::module_host::InitDatabaseError;
+    use spacetimedb_core::host::module_host::InitDatabaseError;
     use spacetimedb_lib::environment::EnvironmentSchemaError;
     while let Some(InitDatabaseError::Other(e)) = error.downcast_ref::<InitDatabaseError>() {
         error = e;
@@ -2129,16 +2129,16 @@ mod tests {
     use async_trait::async_trait;
     use axum::body::{Body, Bytes};
     use http::Request;
-    use spacetimedb::auth::identity::{JwtError, JwtErrorKind, SpacetimeIdentityClaims};
-    use spacetimedb::auth::token_validation::{TokenSigner, TokenValidationError, TokenValidator};
-    use spacetimedb::client::ClientActorIndex;
-    use spacetimedb::energy::{EnergyBalance, EnergyQuanta};
-    use spacetimedb::host::module_host::UpdateEnvironmentResult;
-    use spacetimedb::identity::AuthCtx;
-    use spacetimedb::messages::control_db::{Database, Node, Replica};
     use spacetimedb_client_api_messages::name::{
         DomainName, InsertDomainResult, RegisterTldResult, SetDomainsResult, Tld,
     };
+    use spacetimedb_core::auth::identity::{JwtError, JwtErrorKind, SpacetimeIdentityClaims};
+    use spacetimedb_core::auth::token_validation::{TokenSigner, TokenValidationError, TokenValidator};
+    use spacetimedb_core::client::ClientActorIndex;
+    use spacetimedb_core::energy::{EnergyBalance, EnergyQuanta};
+    use spacetimedb_core::host::module_host::UpdateEnvironmentResult;
+    use spacetimedb_core::identity::AuthCtx;
+    use spacetimedb_core::messages::control_db::{Database, Node, Replica};
     use spacetimedb_lib::environment::EnvironmentMap;
     use spacetimedb_lib::Hash;
     use spacetimedb_paths::server::ModuleLogsDir;
@@ -2203,7 +2203,7 @@ mod tests {
 
     #[test]
     fn idc_call_errors_leave_delivery_pending() {
-        use spacetimedb::host::module_host::NoSuchModule;
+        use spacetimedb_core::host::module_host::NoSuchModule;
 
         for (error, expected_status) in [
             (
@@ -2211,7 +2211,7 @@ mod tests {
                 StatusCode::INTERNAL_SERVER_ERROR,
             ),
             (
-                IdcDeliveryFailure::Datastore(spacetimedb::error::DBError::Other(anyhow::anyhow!("write failed"))),
+                IdcDeliveryFailure::Datastore(spacetimedb_core::error::DBError::Other(anyhow::anyhow!("write failed"))),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ),
             (
@@ -2237,8 +2237,8 @@ mod tests {
 
     #[tokio::test]
     async fn idc_responses_wait_until_the_result_is_durable() {
-        use spacetimedb::energy::FunctionBudget;
-        use spacetimedb::host::module_host::IdcStoredReducerOutcome;
+        use spacetimedb_core::energy::FunctionBudget;
+        use spacetimedb_core::host::module_host::IdcStoredReducerOutcome;
         use std::pin::pin;
         use std::task::Poll;
         use tokio::sync::watch;
@@ -2333,8 +2333,8 @@ mod tests {
 
     #[tokio::test]
     async fn reducer_call_reports_success_only_once_durable() {
-        use spacetimedb::energy::FunctionBudget;
-        use spacetimedb::subscription::module_subscription_manager::from_tx_offset;
+        use spacetimedb_core::energy::FunctionBudget;
+        use spacetimedb_core::subscription::module_subscription_manager::from_tx_offset;
         use std::pin::pin;
         use tokio::sync::watch;
 
@@ -2374,7 +2374,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn call_confirmation_times_out_with_live_senders() {
-        use spacetimedb::subscription::module_subscription_manager::from_tx_offset;
+        use spacetimedb_core::subscription::module_subscription_manager::from_tx_offset;
         use std::pin::pin;
 
         let (_sender, pending_offset) = oneshot::channel();
@@ -2399,16 +2399,16 @@ mod tests {
         let missing = || EnvironmentSchemaError::MissingRequired { key: "API_KEY".into() };
         for response in [
             publish_error(anyhow::Error::new(missing()).context("publication failed")),
-            publish_migration_error(spacetimedb::db::environment::EnvironmentError::Schema(missing()).into()),
+            publish_migration_error(spacetimedb_core::db::environment::EnvironmentError::Schema(missing()).into()),
             publish_error(
-                spacetimedb::host::module_host::InitDatabaseError::Other(
-                    spacetimedb::db::environment::EnvironmentError::Schema(missing()).into(),
+                spacetimedb_core::host::module_host::InitDatabaseError::Other(
+                    spacetimedb_core::db::environment::EnvironmentError::Schema(missing()).into(),
                 )
                 .into(),
             ),
             publish_migration_error(
-                spacetimedb::host::module_host::InitDatabaseError::Other(
-                    spacetimedb::db::environment::EnvironmentError::Schema(missing()).into(),
+                spacetimedb_core::host::module_host::InitDatabaseError::Other(
+                    spacetimedb_core::db::environment::EnvironmentError::Schema(missing()).into(),
                 )
                 .into(),
             ),
@@ -2429,9 +2429,9 @@ mod tests {
         // including when the module fails while applying the new environment.
         for result in [
             Ok(UpdateEnvironmentResult::ErrorExecutingMigration(
-                spacetimedb::db::environment::EnvironmentError::Schema(missing()).into(),
+                spacetimedb_core::db::environment::EnvironmentError::Schema(missing()).into(),
             )),
-            Err(spacetimedb::db::environment::EnvironmentError::Schema(missing()).into()),
+            Err(spacetimedb_core::db::environment::EnvironmentError::Schema(missing()).into()),
         ] {
             let response = environment_publish_result(result).await.into_response();
             assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -2465,7 +2465,7 @@ mod tests {
     #[derive(Clone)]
     struct DummyJwtProvider {
         validator: DummyValidator,
-        keys: Option<std::sync::Arc<spacetimedb::auth::JwtKeys>>,
+        keys: Option<std::sync::Arc<spacetimedb_core::auth::JwtKeys>>,
     }
 
     impl TokenSigner for DummyJwtProvider {
@@ -2800,7 +2800,7 @@ mod tests {
     async fn idc_route_requires_host_credentials_and_exposes_no_jwt() -> anyhow::Result<()> {
         let receiver = test_identity(201);
         let sender = test_identity(202);
-        let keys = std::sync::Arc::new(spacetimedb::auth::JwtKeys::generate()?);
+        let keys = std::sync::Arc::new(spacetimedb_core::auth::JwtKeys::generate()?);
         let mut state = DummyState::new().with_database(receiver);
         state.jwt.keys = Some(keys.clone());
         let app = DatabaseRoutes {
@@ -2815,10 +2815,10 @@ mod tests {
         }
         .into_router(state.clone())
         .with_state(state);
-        let valid = spacetimedb::auth::idc::sign(&keys.private, sender, receiver)?;
-        let wrong_receiver = spacetimedb::auth::idc::sign(&keys.private, sender, sender)?;
+        let valid = spacetimedb_core::auth::idc::sign(&keys.private, sender, receiver)?;
+        let wrong_receiver = spacetimedb_core::auth::idc::sign(&keys.private, sender, sender)?;
         let wrong_key =
-            spacetimedb::auth::idc::sign(&spacetimedb::auth::JwtKeys::generate()?.private, sender, receiver)?;
+            spacetimedb_core::auth::idc::sign(&spacetimedb_core::auth::JwtKeys::generate()?.private, sender, receiver)?;
         let (_, client_token) =
             crate::auth::TokenClaims::new("localhost".into(), "client".into()).encode_and_sign(&keys.private)?;
         let call_idc_route = async |token: Option<&str>| {

@@ -17,11 +17,11 @@ use crate::{try_with_tx, with_tx, AuthCtx, Timestamp, TxContext};
 use bytes::Bytes;
 #[cfg(all(feature = "rand08", feature = "unstable"))]
 use rand08::RngCore;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 use spacetimedb_lib::bsatn;
 #[cfg(feature = "unstable")]
 use spacetimedb_lib::db::raw_def::v10::MethodOrAny;
-#[cfg(any(target_arch = "wasm32", feature = "unstable"))]
+#[cfg(any(target_arch = "wasm32", feature = "unstable", test))]
 use spacetimedb_lib::http as st_http;
 #[cfg(feature = "unstable")]
 use spacetimedb_lib::http::{character_is_acceptable_for_route_path, ACCEPTABLE_ROUTE_PATH_CHARS_HUMAN_DESCRIPTION};
@@ -42,6 +42,9 @@ use std::str::FromStr;
 pub type Request<T = Body> = http::Request<T>;
 
 pub type Response<T = Body> = http::Response<T>;
+
+mod policy;
+pub use spacetimedb_lib::http::{HttpPolicyError, HttpRequestPolicy, MAX_EXACT_ORIGIN_RESPONSE_BYTES};
 
 /// Define an HTTP handler, a special database function which handles HTTP requests.
 ///
@@ -492,8 +495,9 @@ impl HttpClient {
     ///
     /// Include a [`Timeout`] in the [`Request::extensions`] via [`http::request::Builder::extension`]
     /// to impose a timeout on the request.
-    /// All HTTP requests in SpacetimeDB are subject to a maximum timeout of 500 milliseconds.
-    /// All other extensions in `request` are ignored.
+    /// The host defaults to 30 seconds and clamps requested timeouts to at most 180 seconds.
+    /// All other extensions in `request` are ignored; use [`Self::send_with_policy`] for
+    /// mandatory exact-origin transport restrictions.
     ///
     /// The returned [`Response`] may have a status code other than 200 OK.
     /// Callers should inspect [`Response::status`] to handle errors returned from the remote server.
@@ -618,7 +622,7 @@ impl HttpClient {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 fn convert_request(parts: http::request::Parts) -> st_http::Request {
     let http::request::Parts {
         method,

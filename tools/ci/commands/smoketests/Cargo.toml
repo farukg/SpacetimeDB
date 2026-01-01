@@ -9,4 +9,6 @@ duct.workspace = true
 clap.workspace = true
 tempfile.workspace = true
 spacetimedb-guard.workspace = true
-ci-common = { path = "../../common" }
+
+[lints]
+workspace = true

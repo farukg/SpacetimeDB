@@ -224,7 +224,9 @@ pub fn auth_header_from_saved_token(config: &Config, anon_identity: bool) -> Aut
     AuthHeader { token }
 }
 
-pub const VALID_PROTOCOLS: [&str; 2] = ["http", "https"];
+pub use crate::server_url::{
+    VALID_PROTOCOLS, contains_protocol, host_or_url_to_host_and_protocol, url_to_host_and_protocol,
+};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ModuleLanguage {
@@ -298,34 +300,6 @@ pub fn detect_module_language(path_to_module: &Path) -> anyhow::Result<ModuleLan
         Ok(ModuleLanguage::Cpp)
     } else {
         anyhow::bail!("Could not detect the language of the module. Are you in a SpacetimeDB project directory?")
-    }
-}
-
-pub fn url_to_host_and_protocol(url: &str) -> anyhow::Result<(&str, &str)> {
-    if contains_protocol(url) {
-        let protocol = url.split("://").next().unwrap();
-        let host = url.split("://").last().unwrap();
-
-        if !VALID_PROTOCOLS.contains(&protocol) {
-            Err(anyhow::anyhow!("Invalid protocol: {protocol}"))
-        } else {
-            Ok((host, protocol))
-        }
-    } else {
-        Err(anyhow::anyhow!("Invalid url: {url}"))
-    }
-}
-
-pub fn contains_protocol(name_or_url: &str) -> bool {
-    name_or_url.contains("://")
-}
-
-pub fn host_or_url_to_host_and_protocol(host_or_url: &str) -> (&str, Option<&str>) {
-    if contains_protocol(host_or_url) {
-        let (host, protocol) = url_to_host_and_protocol(host_or_url).unwrap();
-        (host, Some(protocol))
-    } else {
-        (host_or_url, None)
     }
 }
 

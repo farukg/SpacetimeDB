@@ -22,27 +22,27 @@ use http::{HeaderValue, StatusCode};
 use prometheus::{Histogram, IntGauge};
 use scopeguard::defer;
 use serde::Deserialize;
-use spacetimedb::client::messages::{
-    serialize, serialize_v3, IdentityTokenMessage, InUseSerializeBuffer, SerializeBuffer, SwitchedServerMessage,
-    ToProtocol,
-};
-use spacetimedb::client::{
-    ClientActorId, ClientConfig, ClientConnection, ClientConnectionReceiver, DataMessage, MessageExecutionError,
-    MessageHandleError, MeteredReceiver, MeteredSender, OutboundMessage, Protocol, SessionBusy, SessionId,
-    SessionReservation, WsVersion,
-};
-use spacetimedb::host::module_host::ClientConnectedError;
-use spacetimedb::host::NoSuchModule;
-use spacetimedb::subscription::row_list_builder_pool::BsatnRowListBuilderPool;
-use spacetimedb::util::spawn_rayon;
-use spacetimedb::worker_metrics::{
-    record_client_rejection, ClientDisconnectCause, ClientDisconnectRecorder, ClientRejectCause, WORKER_METRICS,
-};
-use spacetimedb::Identity;
 use spacetimedb_client_api_messages::websocket::common::SESSION_BUSY_CLOSE_CODE;
 use spacetimedb_client_api_messages::websocket::v1 as ws_v1;
 use spacetimedb_client_api_messages::websocket::v2 as ws_v2;
 use spacetimedb_client_api_messages::websocket::v3 as ws_v3;
+use spacetimedb_core::client::messages::{
+    serialize, serialize_v3, IdentityTokenMessage, InUseSerializeBuffer, SerializeBuffer, SwitchedServerMessage,
+    ToProtocol,
+};
+use spacetimedb_core::client::{
+    ClientActorId, ClientConfig, ClientConnection, ClientConnectionReceiver, DataMessage, MessageExecutionError,
+    MessageHandleError, MeteredReceiver, MeteredSender, OutboundMessage, Protocol, SessionBusy, SessionId,
+    SessionReservation, WsVersion,
+};
+use spacetimedb_core::host::module_host::ClientConnectedError;
+use spacetimedb_core::host::NoSuchModule;
+use spacetimedb_core::subscription::row_list_builder_pool::BsatnRowListBuilderPool;
+use spacetimedb_core::util::spawn_rayon;
+use spacetimedb_core::worker_metrics::{
+    record_client_rejection, ClientDisconnectCause, ClientDisconnectRecorder, ClientRejectCause, WORKER_METRICS,
+};
+use spacetimedb_core::Identity;
 use spacetimedb_lib::bsatn;
 use spacetimedb_lib::connection_id::{ConnectionId, ConnectionIdForUrl};
 use tokio::sync::mpsc;
@@ -96,7 +96,7 @@ pub struct SubscribeQueryParams {
     /// [`SESSION_BUSY_CLOSE_CODE`] and the old one is torn down. A retry
     /// succeeds once the old connection's `client_disconnected` has run, so the
     /// module never observes two live connections for one session.
-    /// See [`spacetimedb::client::ClientSessionIndex`].
+    /// See [`spacetimedb_core::client::ClientSessionIndex`].
     ///
     /// Connections which do not supply one behave exactly as before.
     pub session_id: Option<SessionIdForUrl>,
@@ -2105,7 +2105,7 @@ mod tests {
     };
     use pretty_assertions::assert_matches;
     use proptest::prelude::*;
-    use spacetimedb::client::{messages::SerializableMessage, ClientName, OutboundMessage};
+    use spacetimedb_core::client::{messages::SerializableMessage, ClientName, OutboundMessage};
     use tokio::time::sleep;
 
     use super::*;
@@ -2439,7 +2439,10 @@ mod tests {
             Either::Right(OutboundMessage::V1(SerializableMessage::Identity(
                 IdentityTokenMessage {
                     identity: Identity::ZERO,
-                    token: "macaron".into(),
+                    // SIG-PATCH: remove when upstream fixes.
+                    token: std::env::var("STDB_SUBSCRIBE_TOKEN")
+                        .unwrap_or_else(|_| "macaron".into())
+                        .into(),
                     connection_id: ConnectionId::ZERO,
                 },
             ))),
@@ -2490,7 +2493,10 @@ mod tests {
             Either::Right(OutboundMessage::V1(SerializableMessage::Identity(
                 IdentityTokenMessage {
                     identity: Identity::ZERO,
-                    token: "macaron".into(),
+                    // SIG-PATCH: remove when upstream fixes.
+                    token: std::env::var("STDB_SUBSCRIBE_TOKEN")
+                        .unwrap_or_else(|_| "macaron".into())
+                        .into(),
                     connection_id: ConnectionId::ZERO,
                 },
             ))),

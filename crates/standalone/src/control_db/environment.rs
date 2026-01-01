@@ -286,11 +286,11 @@ fn transaction_error(error: TransactionError<Error>) -> Error {
 }
 
 #[async_trait::async_trait]
-impl spacetimedb::host::InitialEnvironmentSource for ControlDb {
+impl spacetimedb_core::host::InitialEnvironmentSource for ControlDb {
     async fn load(&self, database: &Database, replica_id: u64) -> anyhow::Result<EnvironmentMap> {
         let source = self.clone();
         let database = database.clone();
-        spacetimedb::util::asyncify(move || {
+        spacetimedb_core::util::asyncify(move || {
             let database = source.with_initialization_generation(database)?;
             source.initial_environment(&database, replica_id)
         })
@@ -304,7 +304,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use spacetimedb::messages::control_db::HostType;
+    use spacetimedb_core::messages::control_db::HostType;
 
     fn database() -> Database {
         Database {

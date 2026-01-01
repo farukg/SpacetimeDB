@@ -1,6 +1,4 @@
-use super::{
-    committed_state::CommittedState, mut_tx::MutTxId, state_view::StateView, time::Instant, tx::TxId, tx_state::TxState,
-};
+use super::{committed_state::CommittedState, mut_tx::MutTxId, state_view::StateView, time::Instant, tx::TxId, tx_state::TxState, };
 #[cfg(feature = "metrics")]
 use crate::db_metrics::DB_METRICS;
 use crate::execution_context::{Workload, WorkloadType};

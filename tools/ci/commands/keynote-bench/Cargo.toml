@@ -8,3 +8,6 @@ anyhow.workspace = true
 clap.workspace = true
 keynote-bench-harness = { path = "../../../keynote-bench-harness" }
 spacetimedb-guard.workspace = true
+
+[lints]
+workspace = true

@@ -39,7 +39,6 @@ tokio-util = { workspace = true, optional = true, features = ["io-util"] }
 
 # For the 'test' feature
 env_logger = { workspace = true, optional = true }
-pretty_assertions.workspace = true
 
 [dev-dependencies]
 # Enable streaming in tests

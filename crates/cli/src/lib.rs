@@ -1,25 +1,44 @@
+#[cfg(feature = "commands")]
 pub mod api;
+#[cfg(feature = "commands")]
+#[doc(hidden)]
+pub mod build_support;
+#[cfg(feature = "commands")]
 mod common_args;
 mod config;
+#[cfg(feature = "commands")]
 pub(crate) mod detect;
+#[cfg(feature = "commands")]
 mod edit_distance;
 mod errors;
+#[cfg(feature = "commands")]
 mod schema_extract;
+pub mod server_url;
 pub mod spacetime_config;
+#[cfg(feature = "commands")]
 mod subcommands;
+#[cfg(feature = "commands")]
 mod tasks;
+#[cfg(feature = "commands")]
 pub mod util;
+#[cfg(feature = "commands")]
 pub mod version;
 
+#[cfg(feature = "commands")]
 use std::process::ExitCode;
 
+#[cfg(feature = "commands")]
 use clap::{ArgMatches, Command};
 
 pub use config::Config;
+#[cfg(feature = "commands")]
 use spacetimedb_paths::{RootDir, SpacetimePaths};
+#[cfg(feature = "commands")]
 pub use subcommands::*;
+#[cfg(feature = "commands")]
 pub use tasks::build;
 
+#[cfg(feature = "commands")]
 pub fn get_subcommands() -> Vec<Command> {
     vec![
         publish::cli(),
@@ -48,6 +67,7 @@ pub fn get_subcommands() -> Vec<Command> {
     ]
 }
 
+#[cfg(feature = "commands")]
 pub async fn exec_subcommand(
     config: Config,
     paths: &SpacetimePaths,
@@ -86,10 +106,12 @@ pub async fn exec_subcommand(
 
 /// An error type indicating that the process should exit silently with the
 /// given `ExitCode`.
+#[cfg(feature = "commands")]
 #[derive(thiserror::Error, Debug)]
 #[error("exit with {0:?}")]
 pub struct ExitWithCode(pub ExitCode);
 
+#[cfg(feature = "commands")]
 impl ExitWithCode {
     /// Basic unsuccessful termination.
     pub const FAILURE: Self = ExitWithCode(ExitCode::FAILURE);

@@ -8,3 +8,6 @@ anyhow.workspace = true
 duct.workspace = true
 clap.workspace = true
 ci-common = { path = "../../common" }
+
+[lints]
+workspace = true

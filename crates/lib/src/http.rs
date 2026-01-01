@@ -20,6 +20,9 @@
 
 use spacetimedb_sats::{time_duration::TimeDuration, SpacetimeType};
 
+pub mod policy;
+pub use policy::{HttpPolicyError, HttpRequestPolicy, RequestWithPolicy, MAX_EXACT_ORIGIN_RESPONSE_BYTES};
+
 /// Represents an HTTP request which can be made from a procedure running in a SpacetimeDB database.
 #[derive(Clone, SpacetimeType)]
 #[sats(crate = crate, name = "HttpRequest")]

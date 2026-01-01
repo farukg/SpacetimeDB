@@ -8,7 +8,7 @@
 //! }
 //! ```
 
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 mod native_mod {
     use home::home_dir;
     use spacetimedb_lib::{bsatn, de::Deserialize, ser::Serialize};
@@ -153,7 +153,7 @@ mod native_mod {
     }
 }
 
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 mod web_mod {
     pub use gloo_storage::{LocalStorage, SessionStorage, Storage};
 
@@ -305,8 +305,8 @@ mod web_mod {
     }
 }
 
-#[cfg(not(feature = "browser"))]
+#[cfg(not(target_arch = "wasm32"))]
 pub use native_mod::*;
 
-#[cfg(feature = "browser")]
+#[cfg(target_arch = "wasm32")]
 pub use web_mod::*;

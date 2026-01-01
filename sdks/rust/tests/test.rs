@@ -571,6 +571,11 @@ mod rust_procedure_concurrency {
         make_test("procedure-concurrent-with-scheduled-reducer").run()
     }
 
+    #[test]
+    fn procedure_callbacks_fail_on_disconnect() {
+        make_test("procedure-callbacks-fail-on-disconnect").run()
+    }
+
     /// Test that the scheduler can dispatch a scheduled reducer while a previous
     /// scheduled procedure is still running.
     #[test]

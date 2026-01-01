@@ -1,0 +1,54 @@
+name: build-cache
+
+on:
+  push:
+    branches: [github-main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Install sccache
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          SCCACHE_BUCKET: sccache-sigma-zed
+        run: |
+          SCCACHE_VERSION="v0.10.0"
+          SCCACHE_DIR="$(pwd)/target/sccache"
+          mkdir -p "$SCCACHE_DIR"
+          curl -fsSL "https://github.com/mozilla/sccache/releases/download/${SCCACHE_VERSION}/sccache-${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz
+          mv "sccache-${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache" "$SCCACHE_DIR/"
+          rm -rf "sccache-${SCCACHE_VERSION}-x86_64-unknown-linux-musl"
+
+          echo "${SCCACHE_DIR}" >> "$GITHUB_PATH"
+          {
+            echo "SCCACHE_ENDPOINT=https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+            echo "SCCACHE_BUCKET=${SCCACHE_BUCKET}"
+            echo "SCCACHE_REGION=auto"
+            echo "SCCACHE_S3_KEY_PREFIX=sccache-stdb/"
+            echo "AWS_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}"
+            echo "AWS_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}"
+            echo "RUSTC_WRAPPER=${SCCACHE_DIR}/sccache"
+          } >> "$GITHUB_ENV"
+
+      - name: Build spacetimedb-cli + standalone (populate sccache)
+        run: cargo build --release -p spacetimedb-cli -p spacetimedb-standalone
+
+      - name: Show sccache stats
+        run: sccache --show-stats
+
+      # GitLab's trigger_build job starts the build pipeline independently;
+      # this workflow only warms the shared sccache and stops.

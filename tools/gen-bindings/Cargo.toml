@@ -7,3 +7,6 @@ edition = "2024"
 anyhow = "1"
 clap.workspace = true
 replace-spacetimedb = { path = "../replace-spacetimedb" }
+
+[lints]
+workspace = true

@@ -32,11 +32,11 @@ use spacetimedb_data_structures::error_stream::{CollectAllErrors, CombineErrors,
 use spacetimedb_data_structures::map::{Equivalent, HashMap};
 use spacetimedb_lib::db::raw_def;
 use spacetimedb_lib::db::raw_def::v10::{
-    ExplicitNames, MethodOrAny, RawColumnDefaultValueV10, RawConstraintDefV10, RawHttpHandlerDefV10,
-    RawHttpRouteDefV10, RawIndexDefV10, RawLifeCycleReducerDefV10, RawModuleDefV10, RawModuleDefV10Section,
-    RawOutboxDefV10, RawProcedureDefV10, RawReducerDefV10, RawRowLevelSecurityDefV10, RawScheduleDefV10,
-    RawScopedTypeNameV10, RawSequenceDefV10, RawSubmoduleV10, RawTableDefV10, RawTypeDefV10, RawViewDefV10,
-    RawViewPrimaryKeyDefV10,
+    CaseConversionPolicy, ExplicitNames, MethodOrAny, RawColumnDefaultValueV10, RawConstraintDefV10,
+    RawHttpHandlerDefV10, RawHttpRouteDefV10, RawIndexDefV10, RawLifeCycleReducerDefV10, RawModuleDefV10,
+    RawModuleDefV10Section, RawOutboxDefV10, RawProcedureDefV10, RawReducerDefV10, RawRowLevelSecurityDefV10,
+    RawScheduleDefV10, RawScopedTypeNameV10, RawSequenceDefV10, RawSubmoduleV10, RawTableDefV10, RawTypeDefV10,
+    RawViewDefV10, RawViewPrimaryKeyDefV10,
 };
 use spacetimedb_lib::db::raw_def::v9::{
     Lifecycle, RawColumnDefaultValueV9, RawConstraintDataV9, RawConstraintDefV9, RawIndexAlgorithm, RawIndexDefV9,
@@ -1117,6 +1117,8 @@ impl From<ModuleDef> for RawModuleDefV10 {
         let mut explicit_names = ExplicitNames::default();
 
         sections.push(RawModuleDefV10Section::Typespace(typespace));
+        // ModuleDef names are already canonical; do not normalize them again on import.
+        sections.push(RawModuleDefV10Section::CaseConversionPolicy(CaseConversionPolicy::None));
 
         // Extract lifecycle reducer names before consuming reducers.
         let raw_lifecycle: Vec<RawLifeCycleReducerDefV10> = lifecycle_reducers
@@ -1204,19 +1206,51 @@ impl From<ModuleDef> for RawModuleDefV10 {
             sections.push(RawModuleDefV10Section::Procedures(raw_procedures));
         }
 
+        let mut routes_by_handler: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for (ordinal, route) in http_routes.into_iter().enumerate() {
+            let HttpRouteDef {
+                handler_name,
+                method,
+                path,
+            } = route;
+            routes_by_handler
+                .entry(handler_name)
+                .or_default()
+                .push((ordinal, method, path));
+        }
+        let mut raw_http_routes = Vec::new();
         let raw_http_handlers: Vec<RawHttpHandlerDefV10> = http_handlers
             .into_values()
-            .map(|hd| RawHttpHandlerDefV10 {
-                source_name: hd.accessor_name.into(),
+            .map(|hd| {
+                // Validated route groups belong to handlers; unused handlers have no group.
+                if let Some(routes) = routes_by_handler.remove(&hd.name) {
+                    raw_http_routes.extend(routes.into_iter().map(|(ordinal, method, path)| {
+                        (
+                            ordinal,
+                            RawHttpRouteDefV10 {
+                                handler_function: hd.accessor_name.clone().into(),
+                                method,
+                                path: RawIdentifier::new(path.as_ref()),
+                            },
+                        )
+                    }));
+                }
+                explicit_names.insert_function(
+                    RawIdentifier::from(hd.accessor_name.clone()),
+                    RawIdentifier::from(hd.name.clone()),
+                );
+                RawHttpHandlerDefV10 {
+                    source_name: hd.accessor_name.into(),
+                }
             })
             .collect();
         if !raw_http_handlers.is_empty() {
             sections.push(RawModuleDefV10Section::HttpHandlers(raw_http_handlers));
         }
 
-        if !http_routes.is_empty() {
-            let raw_http_routes: Vec<RawHttpRouteDefV10> =
-                http_routes.into_iter().map(RawHttpRouteDefV10::from).collect();
+        raw_http_routes.sort_unstable_by_key(|(ordinal, _)| *ordinal);
+        let raw_http_routes = raw_http_routes.into_iter().map(|(_, route)| route).collect::<Vec<_>>();
+        if !raw_http_routes.is_empty() {
             sections.push(RawModuleDefV10Section::HttpRoutes(raw_http_routes));
         }
 
