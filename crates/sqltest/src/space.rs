@@ -1,9 +1,9 @@
 use crate::db::DBRunner;
 use async_trait::async_trait;
-use spacetimedb::db::relational_db::tests_utils::TestDB;
-use spacetimedb::error::DBError;
-use spacetimedb::sql::execute::{run, SqlResult};
-use spacetimedb::subscription::module_subscription_actor::ModuleSubscriptions;
+use spacetimedb_core::db::relational_db::tests_utils::TestDB;
+use spacetimedb_core::error::DBError;
+use spacetimedb_core::sql::execute::{run, SqlResult};
+use spacetimedb_core::subscription::module_subscription_actor::ModuleSubscriptions;
 use spacetimedb_lib::identity::AuthCtx;
 use spacetimedb_sats::algebraic_value::Packed;
 use spacetimedb_sats::meta_type::MetaType;

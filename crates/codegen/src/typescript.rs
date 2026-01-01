@@ -58,7 +58,7 @@ impl Lang for TypeScript {
         module: &ModuleDef,
         table: &TableDef,
         _schema: TableSchema,
-    ) -> OutputFile {
+    ) -> Result<OutputFile, crate::CodegenError> {
         let mut output = CodeIndenter::new(String::new(), INDENT);
         let out = &mut output;
 
@@ -84,324 +84,345 @@ impl Lang for TypeScript {
         write_object_type_builder_fields(module, out, &product_def.elements, table.primary_key, true, true).unwrap();
         out.dedent(1);
         writeln!(out, "}});");
-        OutputFile {
+        Ok(OutputFile {
             filename: table_module_name(&table.accessor_name) + ".ts",
             code: output.into_inner(),
-        }
+        })
     }
 
-    fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
+    fn generate_reducer_file(
+        &self,
+        module: &ModuleDef,
+        reducer: &ReducerDef,
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = CodeIndenter::new(String::new(), INDENT);
+            let out = &mut output;
 
-        print_file_header(out, false, true);
+            print_file_header(out, false, true);
 
-        out.newline();
+            out.newline();
 
-        gen_and_print_imports(
-            module,
-            out,
-            reducer.params_for_generate.element_types(),
-            // No need to skip any imports; we're not emitting a type that other modules can import.
-            &[],
-        );
+            gen_and_print_imports(
+                module,
+                out,
+                reducer.params_for_generate.element_types(),
+                // No need to skip any imports; we're not emitting a type that other modules can import.
+                &[],
+            );
 
-        define_body_for_reducer(module, out, &reducer.params_for_generate.elements);
+            define_body_for_reducer(module, out, &reducer.params_for_generate.elements);
 
-        OutputFile {
-            filename: reducer_module_name(&reducer.accessor_name) + ".ts",
-            code: output.into_inner(),
-        }
+            OutputFile {
+                filename: reducer_module_name(&reducer.accessor_name) + ".ts",
+                code: output.into_inner(),
+            }
+        })
     }
 
     fn generate_procedure_file(
         &self,
         module: &ModuleDef,
         procedure: &spacetimedb_schema::def::ProcedureDef,
-    ) -> OutputFile {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = CodeIndenter::new(String::new(), INDENT);
+            let out = &mut output;
 
-        print_file_header(out, false, true);
+            print_file_header(out, false, true);
 
-        out.newline();
+            out.newline();
 
-        gen_and_print_imports(
-            module,
-            out,
-            procedure
-                .params_for_generate
-                .element_types()
-                .chain([&procedure.return_type_for_generate]),
-            // No need to skip any imports; we're not emitting a type that other modules can import.
-            &[],
-        );
-
-        writeln!(out, "export const params = {{");
-        out.with_indent(|out| {
-            write_object_type_builder_fields(module, out, &procedure.params_for_generate.elements, None, true, false)
-                .unwrap()
-        });
-        writeln!(out, "}};");
-
-        write!(out, "export const returnType = ");
-        write_type_builder(module, out, &procedure.return_type_for_generate).unwrap();
-
-        OutputFile {
-            filename: procedure_module_name(&procedure.accessor_name) + ".ts",
-            code: output.into_inner(),
-        }
-    }
-
-    fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
-
-        print_file_header(out, true, false);
-
-        writeln!(out);
-        writeln!(out, "// Import all reducer arg schemas");
-        for reducer in iter_reducers(module, options.visibility) {
-            if !is_reducer_invokable(reducer) {
-                // Skip system-defined reducers
-                continue;
-            }
-            let reducer_module_name = reducer_module_name(&reducer.accessor_name);
-            let args_type = reducer_args_type_name(&reducer.accessor_name);
-            writeln!(out, "import {args_type} from \"./{reducer_module_name}\";");
-        }
-
-        writeln!(out);
-        writeln!(out, "// Import all procedure arg schemas");
-        for procedure in iter_procedures(module, options.visibility) {
-            let procedure_module_name = procedure_module_name(&procedure.accessor_name);
-            let args_type = procedure_args_type_name(&procedure.accessor_name);
-            writeln!(out, "import * as {args_type} from \"./{procedure_module_name}\";");
-        }
-
-        writeln!(out);
-        writeln!(out, "// Import all table schema definitions");
-        for (_, accessor_name, _) in iter_table_names_and_types(module, options.visibility) {
-            let table_module_name = table_module_name(accessor_name);
-            let table_name_pascalcase = accessor_name.deref().to_case(Case::Pascal);
-            // TODO: This really shouldn't be necessary. We could also have `table()` accept
-            // `__t.object(...)`s.
-            writeln!(out, "import {table_name_pascalcase}Row from \"./{table_module_name}\";");
-        }
-
-        writeln!(out);
-        writeln!(out, "/** Type-only namespace exports for generated type groups. */");
-
-        writeln!(out);
-        writeln!(out, "/** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */");
-        writeln!(out, "const tablesSchema = __schema({{");
-        out.indent(1);
-        for table in iter_tables(module, options.visibility) {
-            let type_ref = table.product_type_ref;
-            let table_name_pascalcase = table.accessor_name.deref().to_case(Case::Pascal);
-            writeln!(out, "{}: __table({{", table.accessor_name);
-            out.indent(1);
-            write_table_opts(
+            gen_and_print_imports(
                 module,
                 out,
-                type_ref,
-                &table.name,
-                iter_indexes(table),
-                iter_constraints(table),
-                table.is_event,
+                procedure
+                    .params_for_generate
+                    .element_types()
+                    .chain([&procedure.return_type_for_generate]),
+                // No need to skip any imports; we're not emitting a type that other modules can import.
+                &[],
             );
-            out.dedent(1);
-            writeln!(out, "}}, {}Row),", table_name_pascalcase);
-        }
-        for view in iter_views(module) {
-            let type_ref = view.product_type_ref;
-            let view_name_pascalcase = view.accessor_name.deref().to_case(Case::Pascal);
-            writeln!(out, "{}: __table({{", view.accessor_name);
-            out.indent(1);
-            write_table_opts(module, out, type_ref, &view.name, iter::empty(), iter::empty(), false);
-            out.dedent(1);
-            writeln!(out, "}}, {}Row),", view_name_pascalcase);
-        }
-        out.dedent(1);
-        writeln!(out, "}});");
 
-        writeln!(out);
-        writeln!(out, "/** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */");
-        writeln!(out, "const reducersSchema = __reducers(");
-        out.indent(1);
-        for reducer in iter_reducers(module, options.visibility) {
-            if !is_reducer_invokable(reducer) {
-                // Skip system-defined reducers
-                continue;
+            writeln!(out, "export const params = {{");
+            out.with_indent(|out| {
+                write_object_type_builder_fields(
+                    module,
+                    out,
+                    &procedure.params_for_generate.elements,
+                    None,
+                    true,
+                    false,
+                )
+                .unwrap()
+            });
+            writeln!(out, "}};");
+
+            write!(out, "export const returnType = ");
+            write_type_builder(module, out, &procedure.return_type_for_generate).unwrap();
+
+            OutputFile {
+                filename: procedure_module_name(&procedure.accessor_name) + ".ts",
+                code: output.into_inner(),
             }
-            let args_type = reducer_args_type_name(&reducer.accessor_name);
-            writeln!(out, "__reducerSchema(\"{}\", {}),", reducer.name, args_type);
-        }
-        out.dedent(1);
-        writeln!(out, ");");
+        })
+    }
 
-        writeln!(out);
-        writeln!(
+    fn generate_global_files(
+        &self,
+        module: &ModuleDef,
+        options: &CodegenOptions,
+    ) -> Result<Vec<OutputFile>, crate::CodegenError> {
+        Ok({
+            let mut output = CodeIndenter::new(String::new(), INDENT);
+            let out = &mut output;
+
+            print_file_header(out, true, false);
+
+            writeln!(out);
+            writeln!(out, "// Import all reducer arg schemas");
+            for reducer in iter_reducers(module, options.visibility) {
+                if !is_reducer_invokable(reducer) {
+                    // Skip system-defined reducers
+                    continue;
+                }
+                let reducer_module_name = reducer_module_name(&reducer.accessor_name);
+                let args_type = reducer_args_type_name(&reducer.accessor_name);
+                writeln!(out, "import {args_type} from \"./{reducer_module_name}\";");
+            }
+
+            writeln!(out);
+            writeln!(out, "// Import all procedure arg schemas");
+            for procedure in iter_procedures(module, options.visibility) {
+                let procedure_module_name = procedure_module_name(&procedure.accessor_name);
+                let args_type = procedure_args_type_name(&procedure.accessor_name);
+                writeln!(out, "import * as {args_type} from \"./{procedure_module_name}\";");
+            }
+
+            writeln!(out);
+            writeln!(out, "// Import all table schema definitions");
+            for (_, accessor_name, _) in iter_table_names_and_types(module, options.visibility) {
+                let table_module_name = table_module_name(accessor_name);
+                let table_name_pascalcase = accessor_name.deref().to_case(Case::Pascal);
+                // TODO: This really shouldn't be necessary. We could also have `table()` accept
+                // `__t.object(...)`s.
+                writeln!(out, "import {table_name_pascalcase}Row from \"./{table_module_name}\";");
+            }
+
+            writeln!(out);
+            writeln!(out, "/** Type-only namespace exports for generated type groups. */");
+
+            writeln!(out);
+            writeln!(out, "/** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */");
+            writeln!(out, "const tablesSchema = __schema({{");
+            out.indent(1);
+            for table in iter_tables(module, options.visibility) {
+                let type_ref = table.product_type_ref;
+                let table_name_pascalcase = table.accessor_name.deref().to_case(Case::Pascal);
+                writeln!(out, "{}: __table({{", table.accessor_name);
+                out.indent(1);
+                write_table_opts(
+                    module,
+                    out,
+                    type_ref,
+                    &table.name,
+                    iter_indexes(table),
+                    iter_constraints(table),
+                    table.is_event,
+                );
+                out.dedent(1);
+                writeln!(out, "}}, {}Row),", table_name_pascalcase);
+            }
+            for view in iter_views(module) {
+                let type_ref = view.product_type_ref;
+                let view_name_pascalcase = view.accessor_name.deref().to_case(Case::Pascal);
+                writeln!(out, "{}: __table({{", view.accessor_name);
+                out.indent(1);
+                write_table_opts(module, out, type_ref, &view.name, iter::empty(), iter::empty(), false);
+                out.dedent(1);
+                writeln!(out, "}}, {}Row),", view_name_pascalcase);
+            }
+            out.dedent(1);
+            writeln!(out, "}});");
+
+            writeln!(out);
+            writeln!(out, "/** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */");
+            writeln!(out, "const reducersSchema = __reducers(");
+            out.indent(1);
+            for reducer in iter_reducers(module, options.visibility) {
+                if !is_reducer_invokable(reducer) {
+                    // Skip system-defined reducers
+                    continue;
+                }
+                let args_type = reducer_args_type_name(&reducer.accessor_name);
+                writeln!(out, "__reducerSchema(\"{}\", {}),", reducer.name, args_type);
+            }
+            out.dedent(1);
+            writeln!(out, ");");
+
+            writeln!(out);
+            writeln!(
             out,
             "/** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */"
         );
-        writeln!(out, "const proceduresSchema = __procedures(");
-        out.indent(1);
-        for procedure in iter_procedures(module, options.visibility) {
-            let args_type = procedure_args_type_name(&procedure.accessor_name);
+            writeln!(out, "const proceduresSchema = __procedures(");
+            out.indent(1);
+            for procedure in iter_procedures(module, options.visibility) {
+                let args_type = procedure_args_type_name(&procedure.accessor_name);
+                writeln!(
+                    out,
+                    "__procedureSchema(\"{}\", {args_type}.params, {args_type}.returnType),",
+                    procedure.name,
+                );
+            }
+            out.dedent(1);
+            writeln!(out, ");");
+
+            writeln!(out);
             writeln!(
                 out,
-                "__procedureSchema(\"{}\", {args_type}.params, {args_type}.returnType),",
-                procedure.name,
+                "/** The remote SpacetimeDB module schema, both runtime and type information. */"
             );
-        }
-        out.dedent(1);
-        writeln!(out, ");");
+            writeln!(out, "const REMOTE_MODULE = {{");
+            out.indent(1);
+            writeln!(out, "versionInfo: {{");
+            out.indent(1);
+            writeln!(out, "cliVersion: \"{}\" as const,", spacetimedb_lib_version());
+            out.dedent(1);
+            writeln!(out, "}},");
+            writeln!(out, "tables: tablesSchema.schemaType.tables,");
+            writeln!(out, "reducers: reducersSchema.reducersType.reducers,");
+            writeln!(out, "...proceduresSchema,");
+            out.dedent(1);
+            writeln!(out, "}} satisfies __RemoteModule<");
+            out.indent(1);
+            writeln!(out, "typeof tablesSchema.schemaType,");
+            writeln!(out, "typeof reducersSchema.reducersType,");
+            writeln!(out, "typeof proceduresSchema");
+            out.dedent(1);
+            writeln!(out, ">;");
+            out.dedent(1);
 
-        writeln!(out);
-        writeln!(
-            out,
-            "/** The remote SpacetimeDB module schema, both runtime and type information. */"
-        );
-        writeln!(out, "const REMOTE_MODULE = {{");
-        out.indent(1);
-        writeln!(out, "versionInfo: {{");
-        out.indent(1);
-        writeln!(out, "cliVersion: \"{}\" as const,", spacetimedb_lib_version());
-        out.dedent(1);
-        writeln!(out, "}},");
-        writeln!(out, "tables: tablesSchema.schemaType.tables,");
-        writeln!(out, "reducers: reducersSchema.reducersType.reducers,");
-        writeln!(out, "...proceduresSchema,");
-        out.dedent(1);
-        writeln!(out, "}} satisfies __RemoteModule<");
-        out.indent(1);
-        writeln!(out, "typeof tablesSchema.schemaType,");
-        writeln!(out, "typeof reducersSchema.reducersType,");
-        writeln!(out, "typeof proceduresSchema");
-        out.dedent(1);
-        writeln!(out, ">;");
-        out.dedent(1);
-
-        writeln!(out);
-        writeln!(out, "/** The tables available in this remote SpacetimeDB module. Each table reference doubles as a query builder. */");
-        writeln!(
+            writeln!(out);
+            writeln!(out, "/** The tables available in this remote SpacetimeDB module. Each table reference doubles as a query builder. */");
+            writeln!(
             out,
             "export const tables: __QueryBuilder<typeof tablesSchema.schemaType> = __makeQueryBuilder(tablesSchema.schemaType);"
         );
-        writeln!(out);
-        writeln!(out, "/** The reducers available in this remote SpacetimeDB module. */");
-        writeln!(
-            out,
-            "export const reducers = __convertToAccessorMap(reducersSchema.reducersType.reducers);"
-        );
-        writeln!(out);
-        writeln!(
-            out,
-            "/** The procedures available in this remote SpacetimeDB module. */"
-        );
-        writeln!(
-            out,
-            "export const procedures = __convertToAccessorMap(proceduresSchema.procedures);"
-        );
+            writeln!(out);
+            writeln!(out, "/** The reducers available in this remote SpacetimeDB module. */");
+            writeln!(
+                out,
+                "export const reducers = __convertToAccessorMap(reducersSchema.reducersType.reducers);"
+            );
+            writeln!(out);
+            writeln!(
+                out,
+                "/** The procedures available in this remote SpacetimeDB module. */"
+            );
+            writeln!(
+                out,
+                "export const procedures = __convertToAccessorMap(proceduresSchema.procedures);"
+            );
 
-        // Write type aliases for EventContext, ReducerEventContext, SubscriptionEventContext, ErrorContext
-        writeln!(out);
-        writeln!(
-            out,
-            "/** The context type returned in callbacks for all possible events. */"
-        );
-        writeln!(
-            out,
-            "export type EventContext = __EventContextInterface<typeof REMOTE_MODULE>;"
-        );
+            // Write type aliases for EventContext, ReducerEventContext, SubscriptionEventContext, ErrorContext
+            writeln!(out);
+            writeln!(
+                out,
+                "/** The context type returned in callbacks for all possible events. */"
+            );
+            writeln!(
+                out,
+                "export type EventContext = __EventContextInterface<typeof REMOTE_MODULE>;"
+            );
 
-        writeln!(out, "/** The context type returned in callbacks for reducer events. */");
-        writeln!(
-            out,
-            "export type ReducerEventContext = __ReducerEventContextInterface<typeof REMOTE_MODULE>;"
-        );
+            writeln!(out, "/** The context type returned in callbacks for reducer events. */");
+            writeln!(
+                out,
+                "export type ReducerEventContext = __ReducerEventContextInterface<typeof REMOTE_MODULE>;"
+            );
 
-        writeln!(
-            out,
-            "/** The context type returned in callbacks for subscription events. */"
-        );
-        writeln!(
-            out,
-            "export type SubscriptionEventContext = __SubscriptionEventContextInterface<typeof REMOTE_MODULE>;"
-        );
+            writeln!(
+                out,
+                "/** The context type returned in callbacks for subscription events. */"
+            );
+            writeln!(
+                out,
+                "export type SubscriptionEventContext = __SubscriptionEventContextInterface<typeof REMOTE_MODULE>;"
+            );
 
-        writeln!(out, "/** The context type returned in callbacks for error events. */");
-        writeln!(
-            out,
-            "export type ErrorContext = __ErrorContextInterface<typeof REMOTE_MODULE>;"
-        );
+            writeln!(out, "/** The context type returned in callbacks for error events. */");
+            writeln!(
+                out,
+                "export type ErrorContext = __ErrorContextInterface<typeof REMOTE_MODULE>;"
+            );
 
-        writeln!(out, "/** The subscription handle type to manage active subscriptions created from a {{@link SubscriptionBuilder}}. */");
-        writeln!(
-            out,
-            "export type SubscriptionHandle = __SubscriptionHandleImpl<typeof REMOTE_MODULE>;"
-        );
+            writeln!(out, "/** The subscription handle type to manage active subscriptions created from a {{@link SubscriptionBuilder}}. */");
+            writeln!(
+                out,
+                "export type SubscriptionHandle = __SubscriptionHandleImpl<typeof REMOTE_MODULE>;"
+            );
 
-        writeln!(out);
-        writeln!(
-            out,
-            "/** Builder class to configure a new subscription to the remote SpacetimeDB instance. */"
-        );
-        writeln!(
-            out,
-            "export class SubscriptionBuilder extends __SubscriptionBuilderImpl<typeof REMOTE_MODULE> {{}}"
-        );
+            writeln!(out);
+            writeln!(
+                out,
+                "/** Builder class to configure a new subscription to the remote SpacetimeDB instance. */"
+            );
+            writeln!(
+                out,
+                "export class SubscriptionBuilder extends __SubscriptionBuilderImpl<typeof REMOTE_MODULE> {{}}"
+            );
 
-        writeln!(out);
-        writeln!(
-            out,
-            "/** Builder class to configure a new database connection to the remote SpacetimeDB instance. */"
-        );
-        writeln!(
-            out,
-            "export class DbConnectionBuilder extends __DbConnectionBuilder<DbConnection> {{}}"
-        );
+            writeln!(out);
+            writeln!(
+                out,
+                "/** Builder class to configure a new database connection to the remote SpacetimeDB instance. */"
+            );
+            writeln!(
+                out,
+                "export class DbConnectionBuilder extends __DbConnectionBuilder<DbConnection> {{}}"
+            );
 
-        writeln!(out);
-        writeln!(out, "/** The typed database connection to manage connections to the remote SpacetimeDB instance. This class has type information specific to the generated module. */");
-        writeln!(
-            out,
-            "export class DbConnection extends __DbConnectionImpl<typeof REMOTE_MODULE> {{"
-        );
-        out.indent(1);
-        writeln!(out, "/** Creates a new {{@link DbConnectionBuilder}} to configure and connect to the remote SpacetimeDB instance. */");
-        writeln!(out, "static builder = (): DbConnectionBuilder => {{");
-        out.indent(1);
-        writeln!(
+            writeln!(out);
+            writeln!(out, "/** The typed database connection to manage connections to the remote SpacetimeDB instance. This class has type information specific to the generated module. */");
+            writeln!(
+                out,
+                "export class DbConnection extends __DbConnectionImpl<typeof REMOTE_MODULE> {{"
+            );
+            out.indent(1);
+            writeln!(out, "/** Creates a new {{@link DbConnectionBuilder}} to configure and connect to the remote SpacetimeDB instance. */");
+            writeln!(out, "static builder = (): DbConnectionBuilder => {{");
+            out.indent(1);
+            writeln!(
             out,
             "return new DbConnectionBuilder(REMOTE_MODULE, (config: __DbConnectionConfig<typeof REMOTE_MODULE>) => new DbConnection(config));"
         );
-        out.dedent(1);
-        writeln!(out, "}};");
+            out.dedent(1);
+            writeln!(out, "}};");
 
-        writeln!(out);
-        writeln!(out, "/** Creates a new {{@link SubscriptionBuilder}} to configure a subscription to the remote SpacetimeDB instance. */");
-        writeln!(out, "override subscriptionBuilder = (): SubscriptionBuilder => {{");
-        out.indent(1);
-        writeln!(out, "return new SubscriptionBuilder(this);");
+            writeln!(out);
+            writeln!(out, "/** Creates a new {{@link SubscriptionBuilder}} to configure a subscription to the remote SpacetimeDB instance. */");
+            writeln!(out, "override subscriptionBuilder = (): SubscriptionBuilder => {{");
+            out.indent(1);
+            writeln!(out, "return new SubscriptionBuilder(this);");
 
-        out.dedent(1);
-        writeln!(out, "}};");
-        out.dedent(1);
-        writeln!(out, "}}");
-        out.newline();
+            out.dedent(1);
+            writeln!(out, "}};");
+            out.dedent(1);
+            writeln!(out, "}}");
+            out.newline();
 
-        let index_file = OutputFile {
-            filename: "index.ts".to_string(),
-            code: output.into_inner(),
-        };
+            let index_file = OutputFile {
+                filename: "index.ts".to_string(),
+                code: output.into_inner(),
+            };
 
-        let reducers_file = generate_reducers_file(module, options);
-        let procedures_file = generate_procedures_file(module, options);
-        let types_file = generate_types_file(module);
+            let reducers_file = generate_reducers_file(module, options);
+            let procedures_file = generate_procedures_file(module, options);
+            let types_file = generate_types_file(module);
 
-        vec![index_file, reducers_file, procedures_file, types_file]
+            vec![index_file, reducers_file, procedures_file, types_file]
+        })
     }
 }
 
@@ -772,7 +793,10 @@ fn write_type_builder_field(
     }
     write_type_builder(module, out, ty)?;
     if is_primary_key {
-        write!(out, ".primaryKey()");
+        // Custom domain types (Refs) don't have a .primaryKey() builder method in the JS SDK.
+        if !matches!(ty, AlgebraicTypeUse::Ref(_)) {
+            write!(out, ".primaryKey()");
+        }
     }
     if let Some(original_name) = original_name {
         write!(out, ".name(\"{original_name}\")");

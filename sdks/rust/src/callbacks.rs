@@ -90,6 +90,12 @@ impl<M: SpacetimeModule> DbCallbacks<M> {
             table_callbacks.invoke_on_update(event, del, ins);
         }
     }
+
+    pub(crate) fn restore(&mut self, callbacks: Self) {
+        for (table_name, callbacks) in callbacks.table_callbacks {
+            self.get_table_callbacks(table_name).restore(callbacks);
+        }
+    }
 }
 
 /// An insert or delete callback for a row defined by the module `M`.
@@ -198,6 +204,12 @@ impl<M: SpacetimeModule> TableCallbacks<M> {
             callback(ctx, old, new);
         }
     }
+
+    fn restore(&mut self, mut callbacks: Self) {
+        self.on_insert.extend(callbacks.on_insert.drain());
+        self.on_delete.extend(callbacks.on_delete.drain());
+        self.on_update.extend(callbacks.on_update.drain());
+    }
 }
 
 /// A reducer callback for a reducer defined by the module `M`.
@@ -245,36 +257,3 @@ impl<M: SpacetimeModule> ReducerCallbacks<M> {
 /// Procedure return values are deserialized within this function by code injected by the SDK.
 pub(crate) type ProcedureCallback<M> =
     Box<dyn FnOnce(&<M as SpacetimeModule>::ProcedureEventContext, Result<Bytes, InternalError>) + Send + 'static>;
-
-pub struct ProcedureCallbacks<M: SpacetimeModule> {
-    request_id_to_callback: HashMap<u32, ProcedureCallback<M>>,
-}
-
-impl<M: SpacetimeModule> Default for ProcedureCallbacks<M> {
-    fn default() -> Self {
-        Self {
-            request_id_to_callback: Default::default(),
-        }
-    }
-}
-
-impl<M: SpacetimeModule> ProcedureCallbacks<M> {
-    pub(crate) fn insert(&mut self, request_id: u32, callback: ProcedureCallback<M>) {
-        if self.request_id_to_callback.insert(request_id, callback).is_some() {
-            unreachable!("Request IDs are drawn from a global monotonic atomic counter and so are unique");
-        };
-    }
-
-    pub(crate) fn resolve(
-        &mut self,
-        ctx: &<M as SpacetimeModule>::ProcedureEventContext,
-        request_id: u32,
-        result: Result<Bytes, InternalError>,
-    ) {
-        let callback = self
-            .request_id_to_callback
-            .remove(&request_id)
-            .expect("Attempting to resolve a non-existent procedure callback");
-        callback(ctx, result)
-    }
-}

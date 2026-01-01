@@ -1,4 +1,4 @@
-use super::{delete_table::DeleteTable, sequence::Sequence};
+use super::delete_table::DeleteTable;
 use spacetimedb_data_structures::map::IntMap;
 use spacetimedb_lib::db::auth::StAccess;
 use spacetimedb_primitives::{ColList, ConstraintId, IndexId, SequenceId, TableId};
@@ -136,8 +136,8 @@ pub enum PendingSchemaChange {
     ConstraintRemoved(TableId, ConstraintSchema),
     /// The constraint with [`ConstraintId`] was added to the table with [`TableId`].
     ConstraintAdded(TableId, ConstraintId),
-    /// The [`Sequence`] with [`SequenceSchema`] was added to the table with [`TableId`].
-    SequenceRemoved(TableId, Sequence, SequenceSchema),
+    /// The sequence with [`SequenceSchema`] was added to the table with [`TableId`].
+    SequenceRemoved(TableId, SequenceSchema),
     /// The sequence with [`SequenceId`] was added to the table with [`TableId`].
     SequenceAdded(TableId, SequenceId),
 }
@@ -160,9 +160,7 @@ impl MemoryUsage for PendingSchemaChange {
                 table_id.heap_usage() + constraint_schema.heap_usage()
             }
             Self::ConstraintAdded(table_id, constraint_id) => table_id.heap_usage() + constraint_id.heap_usage(),
-            Self::SequenceRemoved(table_id, sequence, sequence_schema) => {
-                table_id.heap_usage() + sequence.heap_usage() + sequence_schema.heap_usage()
-            }
+            Self::SequenceRemoved(table_id, sequence_schema) => table_id.heap_usage() + sequence_schema.heap_usage(),
             Self::SequenceAdded(table_id, sequence_id) => table_id.heap_usage() + sequence_id.heap_usage(),
             Self::ReschemaEventTable(table_id, column_schemas) => table_id.heap_usage() + column_schemas.heap_usage(),
         }

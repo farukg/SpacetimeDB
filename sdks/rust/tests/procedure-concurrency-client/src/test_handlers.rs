@@ -13,6 +13,7 @@ pub async fn dispatch(test: &str, db_name: &str) {
         "procedure-concurrent-with-scheduled-reducer" => {
             exec_procedure_concurrent_with_scheduled_reducer(db_name).await
         }
+        "procedure-callbacks-fail-on-disconnect" => exec_procedure_callbacks_fail_on_disconnect(db_name).await,
         "scheduled-procedure-scheduled-reducer-not-interleaved" => {
             exec_scheduled_procedure_scheduled_reducer_not_interleaved(db_name).await
         }
@@ -390,6 +391,85 @@ async fn exec_procedure_reducer_same_client_interleaved(db_name: &str) {
     .await;
 
     test_counter.wait_for_all().await;
+}
+
+async fn exec_procedure_callbacks_fail_on_disconnect(db_name: &str) {
+    let setup = TestCounter::new();
+    let subscription_applied = setup.add_test("subscription_applied");
+    let test_counter = TestCounter::new();
+    let first_callback = test_counter.add_test("first_in_flight_procedure_failed");
+    let second_callback = test_counter.add_test("second_in_flight_procedure_failed");
+    let mut reentrant_disconnect = Some(test_counter.add_test("reentrant_disconnect_returned"));
+    let disconnect_callback = test_counter.add_test("connection_disconnected");
+    let procedure_starts = Arc::new(Mutex::new(0));
+
+    let conn = connect_with_then(
+        db_name,
+        &setup,
+        "disconnect_drain",
+        move |builder| {
+            builder.on_disconnect(move |_ctx, error| {
+                disconnect_callback(match error {
+                    None => Ok(()),
+                    Some(error) => Err(anyhow::anyhow!("explicit disconnect returned error: {error:?}")),
+                });
+            })
+        },
+        {
+            let procedure_starts = Arc::clone(&procedure_starts);
+            move |ctx| {
+                ctx.db().procedure_concurrency_row().on_insert(move |ctx, row| {
+                    if row.insertion_context == "procedure_before" {
+                        let should_disconnect = {
+                            let mut starts = procedure_starts
+                                .lock()
+                                .expect("procedure start counter mutex is poisoned");
+                            *starts += 1;
+                            *starts == 2
+                        };
+                        if should_disconnect {
+                            if let Some(reentrant_disconnect) = reentrant_disconnect.take() {
+                                reentrant_disconnect(ctx.disconnect().map_err(anyhow::Error::from));
+                            }
+                        }
+                    }
+                });
+                subscribe_all_then(ctx, move |_ctx| subscription_applied(Ok(())));
+            }
+        },
+    )
+    .await;
+
+    setup.wait_for_all().await;
+    conn.procedures
+        .procedure_sleep_between_inserts_then(move |_ctx, result| {
+            first_callback(match result {
+                Err(_) => Ok(()),
+                Ok(()) => Err(anyhow::anyhow!("first procedure completed after disconnect")),
+            });
+        });
+    conn.procedures
+        .procedure_sleep_between_inserts_then(move |_ctx, result| {
+            second_callback(match result {
+                Err(_) => Ok(()),
+                Ok(()) => Err(anyhow::anyhow!("second procedure completed after disconnect")),
+            });
+        });
+
+    test_counter.wait_for_all().await;
+    assert_eq!(*procedure_starts.lock().unwrap(), 2);
+    assert!(matches!(conn.disconnect(), Err(spacetimedb_sdk::Error::Disconnected)));
+
+    let post_terminal = TestCounter::new();
+    let post_terminal_callback = post_terminal.add_test("post_terminal_procedure_failed");
+    conn.procedures
+        .procedure_sleep_between_inserts_then(move |_ctx, result| {
+            post_terminal_callback(match result {
+                Err(_) => Ok(()),
+                Ok(()) => Err(anyhow::anyhow!("post-terminal procedure was accepted")),
+            });
+        });
+    post_terminal.wait_for_all().await;
 }
 
 async fn exec_procedure_concurrent_with_scheduled_reducer(db_name: &str) {

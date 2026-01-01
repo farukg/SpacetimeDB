@@ -316,6 +316,7 @@ impl RelationalDB {
             metrics_recorder_queue,
         );
         db.migrate_system_tables()?;
+        db.repair_sequence_cursors()?;
 
         if let Some(meta) = db.metadata()? {
             if meta.database_identity != database_identity {
@@ -391,6 +392,34 @@ impl RelationalDB {
         }
         let _ = self.commit_tx(tx)?;
         self.inner.assert_system_tables_match()?;
+        Ok(())
+    }
+
+    /// Advance every sequence cursor that does not exceed its column's stored maximum.
+    ///
+    /// Runs during startup, after replay, so that databases whose `st_sequence` rows
+    /// fell behind their columns (see [`MutTx::advance_sequences_past_column_max`])
+    /// stop handing out values that collide with existing rows.
+    fn repair_sequence_cursors(&self) -> Result<(), DBError> {
+        let mut tx = self.begin_mut_tx(IsolationLevel::Serializable, Workload::Internal);
+        let repairs = match tx.advance_sequences_past_column_max() {
+            Ok(repairs) => repairs,
+            Err(e) => {
+                let _ = self.rollback_mut_tx(tx);
+                return Err(e.into());
+            }
+        };
+        for repair in &repairs {
+            log::warn!(
+                "[{}] DATABASE: sequence `{}` on table {} advanced from {} to {} past its column's stored maximum",
+                self.database_identity,
+                repair.sequence_name,
+                repair.table_id,
+                repair.previous_allocated,
+                repair.repaired_allocated,
+            );
+        }
+        let _ = self.commit_tx(tx)?;
         Ok(())
     }
 
@@ -3043,17 +3072,142 @@ mod tests {
         let mut tx = begin_mut_tx(&stdb);
         insert(&stdb, &mut tx, table_id, &product![0i64]).unwrap();
 
-        // Check the second row start after `SEQUENCE_PREALLOCATION_AMOUNT`
-        assert_eq!(collect_from_sorted(&stdb, &tx, table_id, 0i64)?, vec![1, 4097]);
+        // Check the second row is directly after the first, as we perform no preallocation.
+        // The property we actually care about is that the next value is greater than the previous.
+        assert_eq!(collect_from_sorted(&stdb, &tx, table_id, 0i64)?, vec![1, 2]);
         stdb.commit_tx(tx)?;
 
         let stdb = stdb.reopen()?;
         let mut tx = begin_mut_tx(&stdb);
         insert(&stdb, &mut tx, table_id, &product![0i64]).unwrap();
-        // The next value will have a gap because we preallocate, but asserting the specific number
-        // seems brittle.
-        assert!(collect_from_sorted(&stdb, &tx, table_id, 0i64)?[2] > 4097);
+        // The next value will not have a gap because we do not preallocate.
+        // The property we actually care about is that it is larger than the previous two values.
+        assert_eq!(collect_from_sorted(&stdb, &tx, table_id, 0i64)?[2], 3);
         Ok(())
+    }
+
+    /// Insert `count` rows with generated ids into `table_id` and commit.
+    fn insert_generated_and_commit(stdb: &RelationalDB, table_id: TableId, count: usize) -> ResultTest<()> {
+        let mut tx = begin_mut_tx(stdb);
+        for _ in 0..count {
+            insert(stdb, &mut tx, table_id, &product![0i64])?;
+        }
+        stdb.commit_tx(tx)?;
+        Ok(())
+    }
+
+    /// Create `MyTable` (auto-inc `i64`) holding the explicit ids `ids` and commit.
+    fn create_auto_inc_table_with_explicit_ids(stdb: &RelationalDB, ids: &[i64]) -> ResultTest<TableId> {
+        let mut tx = begin_mut_tx(stdb);
+        let table_id = stdb.create_table(&mut tx, table_auto_inc())?;
+        for &id in ids {
+            insert(stdb, &mut tx, table_id, &product![id])?;
+        }
+        stdb.commit_tx(tx)?;
+        Ok(table_id)
+    }
+
+    fn assert_ids_continue_after(stdb: &RelationalDB, table_id: TableId, previous_max: i64) -> ResultTest<()> {
+        let tx = begin_mut_tx(stdb);
+        let ids = collect_sorted::<i64>(stdb, &tx, table_id)?;
+        let _ = stdb.rollback_mut_tx(tx);
+        let generated = ids.iter().filter(|&&id| id > previous_max).count();
+        assert!(
+            generated > 0,
+            "expected generated ids above {previous_max}, got {ids:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    /// A transaction that draws sequence values and rolls back
+    /// must not let a later restart hand out values that committed rows already hold.
+    fn test_auto_inc_rollback_then_reopen_does_not_collide() -> ResultTest<()> {
+        let stdb = TestDB::durable()?;
+        let table_id = create_auto_inc_table_with_explicit_ids(&stdb, &[])?;
+
+        let mut tx = begin_mut_tx(&stdb);
+        insert(&stdb, &mut tx, table_id, &product![0i64])?;
+        let _ = stdb.rollback_mut_tx(tx);
+
+        insert_generated_and_commit(&stdb, table_id, 2)?;
+
+        let stdb = stdb.reopen()?;
+        insert_generated_and_commit(&stdb, table_id, 3)?;
+
+        let tx = begin_mut_tx(&stdb);
+        assert_eq!(collect_sorted::<i64>(&stdb, &tx, table_id)?.len(), 5);
+        Ok(())
+    }
+
+    #[test]
+    /// A sequence cursor behind its column's stored maximum is advanced on reopen,
+    /// so generated ids continue after the existing rows.
+    fn test_auto_inc_reopen_advances_lagging_sequence_past_column_max() -> ResultTest<()> {
+        let stdb = TestDB::durable()?;
+        let table_id = create_auto_inc_table_with_explicit_ids(&stdb, &[7, 42, 69721])?;
+
+        let stdb = stdb.reopen()?;
+        insert_generated_and_commit(&stdb, table_id, 2)?;
+
+        // Only the first generated value is exact: the sequence may skip ahead afterwards.
+        let tx = begin_mut_tx(&stdb);
+        let ids = collect_sorted::<i64>(&stdb, &tx, table_id)?;
+        assert_eq!(ids.len(), 5, "got {ids:?}");
+        assert_eq!(ids[..4], [7, 42, 69721, 69722], "got {ids:?}");
+        Ok(())
+    }
+
+    #[test]
+    /// The cursor repair also applies when restoring from a snapshot
+    /// whose `st_sequence` row lags the column.
+    fn test_auto_inc_snapshot_restore_advances_lagging_sequence() -> ResultTest<()> {
+        // No background snapshot worker, so the manual snapshot below is the only one.
+        let stdb = TestDB::durable_without_snapshot_repo()?;
+        let table_id = create_auto_inc_table_with_explicit_ids(&stdb, &[5, 900])?;
+
+        let repo = open_snapshot_repo(stdb.path().unwrap().snapshots(), Identity::ZERO, 0)?;
+        stdb.take_snapshot(&*repo)?
+            .expect("snapshot not created: empty committed state");
+
+        let (db, durability, rt, dir) = stdb.into_parts();
+        let rt = rt.expect("Durable TestDB must have a runtime");
+        let dir = dir.expect("Durable TestDB must have a database directory");
+        rt.block_on(db.shutdown()).expect("should have durable offset");
+        drop(db);
+        drop(durability);
+
+        let _rt = rt.enter();
+        let (db, _durability) =
+            TestDB::open_existing_durable(&dir, rt.handle().clone(), 0, Identity::ZERO, Identity::ZERO, true)?;
+        insert_generated_and_commit(&db, table_id, 1)?;
+        assert_ids_continue_after(&db, table_id, 900)
+    }
+
+    #[test]
+    /// A torn final commit (partial write at the commitlog tail) is dropped on replay;
+    /// the committed rows before it stay intact and generated ids continue after them.
+    fn test_auto_inc_torn_commitlog_tail_does_not_collide() -> ResultTest<()> {
+        let stdb = TestDB::durable_without_snapshot_repo()?;
+        let table_id = create_auto_inc_table_with_explicit_ids(&stdb, &[3, 4000])?;
+        insert_generated_and_commit(&stdb, table_id, 1)?;
+
+        let (db, durability, rt, dir) = stdb.into_parts();
+        let rt = rt.expect("Durable TestDB must have a runtime");
+        let dir = dir.expect("Durable TestDB must have a database directory");
+        rt.block_on(db.shutdown()).expect("should have durable offset");
+        drop(db);
+        drop(durability);
+
+        let segment = dir.commit_log().segment(0);
+        let len = std::fs::metadata(&segment)?.len();
+        OpenOptions::new().write(true).open(&segment)?.set_len(len - 3)?;
+
+        let _rt = rt.enter();
+        let (db, _durability) =
+            TestDB::open_existing_durable(&dir, rt.handle().clone(), 0, Identity::ZERO, Identity::ZERO, false)?;
+        insert_generated_and_commit(&db, table_id, 2)?;
+        assert_ids_continue_after(&db, table_id, 4000)
     }
 
     #[test]

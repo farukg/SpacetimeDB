@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, path::Path};
 
 use convert_case::{Case, Casing};
-use spacetimedb::db::{Config, Storage};
+use spacetimedb_core::db::{Config, Storage};
 use spacetimedb_lib::{
     sats::{product, ArrayValue},
     AlgebraicValue,
