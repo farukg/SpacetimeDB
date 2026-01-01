@@ -3,9 +3,9 @@ use sled::transaction::{
     self, ConflictableTransactionError, ConflictableTransactionResult, TransactionError, TransactionResult,
     Transactional, TransactionalTree,
 };
-use spacetimedb::energy;
-use spacetimedb::identity::Identity;
-use spacetimedb::messages::control_db::{Database, EnergyBalance, Node, Replica};
+use spacetimedb_core::energy;
+use spacetimedb_core::identity::Identity;
+use spacetimedb_core::messages::control_db::{Database, EnergyBalance, Node, Replica};
 
 use spacetimedb_client_api_messages::name::{
     DomainName, DomainParsingError, InsertDomainResult, RegisterTldResult, SetDomainsResult, Tld, TldRef,
@@ -604,14 +604,14 @@ impl ControlDb {
 }
 
 mod compat {
-    use spacetimedb::hash::Hash;
-    use spacetimedb::messages::control_db::{Database as CanonicalDatabase, HostType};
-    use spacetimedb::Identity;
+    use spacetimedb_core::hash::Hash;
+    use spacetimedb_core::messages::control_db::{Database as CanonicalDatabase, HostType};
+    use spacetimedb_core::Identity;
     use spacetimedb_lib::bsatn::ser::BsatnError;
     use spacetimedb_lib::bsatn::{self, DecodeError};
     use spacetimedb_lib::{de::Deserialize, ser::Serialize};
 
-    /// Serialized form of a [`spacetimedb::messages::control_db::Database`].
+    /// Serialized form of a [`spacetimedb_core::messages::control_db::Database`].
     ///
     /// To maintain compatibility.
     #[derive(Serialize, Deserialize)]

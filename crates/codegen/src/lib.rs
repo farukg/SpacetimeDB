@@ -1,14 +1,23 @@
 use spacetimedb_schema::def::{ModuleDef, ProcedureDef, ReducerDef, TableDef, TypeDef, ViewDef};
 use spacetimedb_schema::schema::{Schema, TableSchema};
+use spacetimedb_schema::type_for_generate::{AlgebraicTypeDef, AlgebraicTypeUse};
+
+#[cfg(feature = "rescript")]
+use self::rescript::DisplayProjectionAdapterError;
+
 mod code_indenter;
 pub mod cpp;
 pub mod csharp;
+#[cfg(feature = "rescript")]
+pub mod rescript;
 pub mod rust;
 pub mod typescript;
 pub mod unrealcpp;
 mod util;
 
 pub use self::csharp::Csharp;
+#[cfg(feature = "rescript")]
+pub use self::rescript::ReScript;
 pub use self::rust::Rust;
 pub use self::typescript::TypeScript;
 pub use self::unrealcpp::UnrealCpp;
@@ -29,15 +38,77 @@ impl Default for CodegenOptions {
     }
 }
 
-pub fn generate(module: &ModuleDef, lang: &dyn Lang, options: &CodegenOptions) -> Vec<OutputFile> {
+#[derive(Debug, thiserror::Error)]
+pub enum CodegenError {
+    #[error("table schema validation failed: {0:?}")]
+    TableSchema(Vec<spacetimedb_schema::def::error::SchemaError>),
+    #[error("row type definition {row_type:?} is absent from the generation typespace")]
+    MissingRowType {
+        row_type: spacetimedb_lib::sats::AlgebraicTypeRef,
+    },
+    #[error("row type definition {row_type:?} must be a product, found {actual}")]
+    RowTypeNotProduct {
+        row_type: spacetimedb_lib::sats::AlgebraicTypeRef,
+        actual: RowTypeDefinition,
+    },
+    #[cfg(feature = "rescript")]
+    #[error(transparent)]
+    DisplayProjection(#[from] DisplayProjectionAdapterError),
+    /// ReScript representation / config validation failed before write.
+    #[cfg(feature = "rescript")]
+    #[error("{0}")]
+    Rescript(String),
+}
+
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+pub enum RowTypeDefinition {
+    #[error("sum")]
+    Sum,
+    #[error("plain enum")]
+    PlainEnum,
+}
+
+pub fn row_product_definition(
+    module: &ModuleDef,
+    row_type: spacetimedb_lib::sats::AlgebraicTypeRef,
+) -> Result<&[(spacetimedb_schema::identifier::Identifier, AlgebraicTypeUse)], CodegenError> {
+    match module.typespace_for_generate().get(row_type) {
+        None => Err(CodegenError::MissingRowType { row_type }),
+        Some(AlgebraicTypeDef::Product(product)) => Ok(&product.elements),
+        Some(AlgebraicTypeDef::Sum(_)) => Err(CodegenError::RowTypeNotProduct {
+            row_type,
+            actual: RowTypeDefinition::Sum,
+        }),
+        Some(AlgebraicTypeDef::PlainEnum(_)) => Err(CodegenError::RowTypeNotProduct {
+            row_type,
+            actual: RowTypeDefinition::PlainEnum,
+        }),
+    }
+}
+
+pub fn generate(
+    module: &ModuleDef,
+    lang: &dyn Lang,
+    options: &CodegenOptions,
+) -> Result<Vec<OutputFile>, CodegenError> {
     itertools::chain!(
         util::iter_tables(module, options.visibility).map(|tbl| lang.generate_table_file(module, tbl)),
         module.views().map(|view| lang.generate_view_file(module, view)),
-        module.types().flat_map(|typ| lang.generate_type_files(module, typ)),
+        module
+            .types()
+            .flat_map(|typ| lang.generate_type_files(module, typ).into_iter().map(Ok)),
         util::iter_reducers(module, options.visibility).map(|reducer| lang.generate_reducer_file(module, reducer)),
         util::iter_procedures(module, options.visibility)
             .map(|procedure| lang.generate_procedure_file(module, procedure)),
-        lang.generate_global_files(module, options),
+        {
+            // Expand global files inside the chain so a single validation/generation
+            // failure aborts before partial consumer writes.
+            match lang.generate_global_files(module, options) {
+                Ok(files) => files.into_iter().map(Ok).collect::<Vec<_>>(),
+                Err(err) => vec![Err(err)],
+            }
+        }
+        .into_iter(),
     )
     .collect()
 }
@@ -48,24 +119,34 @@ pub struct OutputFile {
 }
 
 pub trait Lang {
-    fn generate_table_file_from_schema(&self, module: &ModuleDef, tbl: &TableDef, schema: TableSchema) -> OutputFile;
+    fn generate_table_file_from_schema(
+        &self,
+        module: &ModuleDef,
+        tbl: &TableDef,
+        schema: TableSchema,
+    ) -> Result<OutputFile, CodegenError>;
     fn generate_type_files(&self, module: &ModuleDef, typ: &TypeDef) -> Vec<OutputFile>;
-    fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile;
-    fn generate_procedure_file(&self, module: &ModuleDef, procedure: &ProcedureDef) -> OutputFile;
-    fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile>;
+    fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> Result<OutputFile, CodegenError>;
+    fn generate_procedure_file(&self, module: &ModuleDef, procedure: &ProcedureDef)
+        -> Result<OutputFile, CodegenError>;
+    fn generate_global_files(
+        &self,
+        module: &ModuleDef,
+        options: &CodegenOptions,
+    ) -> Result<Vec<OutputFile>, CodegenError>;
 
-    fn generate_table_file(&self, module: &ModuleDef, tbl: &TableDef) -> OutputFile {
+    fn generate_table_file(&self, module: &ModuleDef, tbl: &TableDef) -> Result<OutputFile, CodegenError> {
         let schema = TableSchema::from_module_def(module, tbl, (), 0.into())
             .validated()
-            .expect("Failed to generate table due to validation errors");
+            .map_err(CodegenError::TableSchema)?;
         self.generate_table_file_from_schema(module, tbl, schema)
     }
 
-    fn generate_view_file(&self, module: &ModuleDef, view: &ViewDef) -> OutputFile {
+    fn generate_view_file(&self, module: &ModuleDef, view: &ViewDef) -> Result<OutputFile, CodegenError> {
         let tbl = TableDef::from(view.clone());
         let schema = TableSchema::from_view_def_for_codegen(module, view)
             .validated()
-            .expect("Failed to generate table due to validation errors");
+            .map_err(CodegenError::TableSchema)?;
         self.generate_table_file_from_schema(module, &tbl, schema)
     }
 }

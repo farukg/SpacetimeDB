@@ -20,7 +20,7 @@ use clap::{Parser, ValueEnum};
 use console::style;
 use itertools::Itertools;
 use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
-use spacetimedb::error::DBError;
+use spacetimedb_core::error::DBError;
 use sqllogictest::{
     default_validator, strict_column_validator, update_record_with_output, AsyncDB, Injected, MakeConnection, Record,
     Runner,

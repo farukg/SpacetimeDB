@@ -90,7 +90,12 @@ pub(crate) fn build_rust(
     // Convert Vec<String> to Vec<&str>
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-    let reader = cargo_cmd("build", build_debug, &args_str).dir(project_path).reader()?;
+    let reader = cargo_cmd("build", build_debug, &args_str)
+        // Do not leak host-target linker flags from an outer cargo invocation into this
+        // wasm-only build; Cargo's target-specific config must own the wasm flags.
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .dir(project_path)
+        .reader()?;
 
     let mut artifact = None;
     for message in Message::parse_stream(io::BufReader::new(reader)) {

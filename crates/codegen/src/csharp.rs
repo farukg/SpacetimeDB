@@ -503,7 +503,12 @@ pub struct Csharp<'opts> {
 }
 
 impl Lang for Csharp<'_> {
-    fn generate_table_file_from_schema(&self, module: &ModuleDef, table: &TableDef, schema: TableSchema) -> OutputFile {
+    fn generate_table_file_from_schema(
+        &self,
+        module: &ModuleDef,
+        table: &TableDef,
+        schema: TableSchema,
+    ) -> Result<OutputFile, crate::CodegenError> {
         let mut output = CsharpAutogen::new(
             self.namespace,
             &[
@@ -730,10 +735,10 @@ impl Lang for Csharp<'_> {
             });
         });
 
-        OutputFile {
+        Ok(OutputFile {
             filename: format!("Tables/{}.g.cs", table.accessor_name.deref().to_case(Case::Pascal)),
             code: output.into_inner(),
-        }
+        })
     }
 
     fn generate_type_files(&self, module: &ModuleDef, typ: &TypeDef) -> Vec<OutputFile> {
@@ -750,455 +755,469 @@ impl Lang for Csharp<'_> {
         vec![OutputFile { filename, code }]
     }
 
-    fn generate_reducer_file(&self, module: &ModuleDef, reducer: &spacetimedb_schema::def::ReducerDef) -> OutputFile {
-        let mut output = CsharpAutogen::new(
-            self.namespace,
-            &[
-                "SpacetimeDB.ClientApi",
-                "System.Collections.Generic",
-                "System.Runtime.Serialization",
-            ],
-            false,
-        );
+    fn generate_reducer_file(
+        &self,
+        module: &ModuleDef,
+        reducer: &spacetimedb_schema::def::ReducerDef,
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = CsharpAutogen::new(
+                self.namespace,
+                &[
+                    "SpacetimeDB.ClientApi",
+                    "System.Collections.Generic",
+                    "System.Runtime.Serialization",
+                ],
+                false,
+            );
 
-        writeln!(output, "public sealed partial class RemoteReducers : RemoteBase");
-        indented_block(&mut output, |output| {
-            let func_name_pascal_case = reducer.accessor_name.deref().to_case(Case::Pascal);
-            let delegate_separator = if reducer.params_for_generate.elements.is_empty() {
-                ""
-            } else {
-                ", "
-            };
+            writeln!(output, "public sealed partial class RemoteReducers : RemoteBase");
+            indented_block(&mut output, |output| {
+                let func_name_pascal_case = reducer.accessor_name.deref().to_case(Case::Pascal);
+                let delegate_separator = if reducer.params_for_generate.elements.is_empty() {
+                    ""
+                } else {
+                    ", "
+                };
 
-            let (func_params, func_args) =
-                build_func_params_and_args(module, reducer.params_for_generate.into_iter(), self.namespace);
+                let (func_params, func_args) =
+                    build_func_params_and_args(module, reducer.params_for_generate.into_iter(), self.namespace);
 
-            writeln!(
+                writeln!(
                 output,
                 "public delegate void {func_name_pascal_case}Handler(ReducerEventContext ctx{delegate_separator}{func_params});"
             );
-            writeln!(
-                output,
-                "public event {func_name_pascal_case}Handler? On{func_name_pascal_case};"
-            );
-            writeln!(output);
-
-            if is_reducer_invokable(reducer) {
-                writeln!(output, "public void {func_name_pascal_case}({func_params})");
-                indented_block(output, |output| {
-                    writeln!(
-                        output,
-                        "conn.InternalCallReducer(new Reducer.{func_name_pascal_case}({func_args}));"
-                    );
-                });
+                writeln!(
+                    output,
+                    "public event {func_name_pascal_case}Handler? On{func_name_pascal_case};"
+                );
                 writeln!(output);
-            }
 
-            writeln!(
+                if is_reducer_invokable(reducer) {
+                    writeln!(output, "public void {func_name_pascal_case}({func_params})");
+                    indented_block(output, |output| {
+                        writeln!(
+                            output,
+                            "conn.InternalCallReducer(new Reducer.{func_name_pascal_case}({func_args}));"
+                        );
+                    });
+                    writeln!(output);
+                }
+
+                writeln!(
                 output,
                 "public bool Invoke{func_name_pascal_case}(ReducerEventContext ctx, Reducer.{func_name_pascal_case} args)"
             );
-            indented_block(output, |output| {
-                writeln!(output, "if (On{func_name_pascal_case} == null)");
                 indented_block(output, |output| {
-                    writeln!(output, "if (InternalOnUnhandledReducerError != null)");
+                    writeln!(output, "if (On{func_name_pascal_case} == null)");
                     indented_block(output, |output| {
-                        writeln!(output, "switch(ctx.Event.Status)");
+                        writeln!(output, "if (InternalOnUnhandledReducerError != null)");
                         indented_block(output, |output| {
-                            writeln!(output, "case Status.Failed(var reason): InternalOnUnhandledReducerError(ctx, new Exception(reason)); break;");
-                            writeln!(output, "case Status.OutOfEnergy(var _): InternalOnUnhandledReducerError(ctx, new Exception(\"out of energy\")); break;");
+                            writeln!(output, "switch(ctx.Event.Status)");
+                            indented_block(output, |output| {
+                                writeln!(output, "case Status.Failed(var reason): InternalOnUnhandledReducerError(ctx, new Exception(reason)); break;");
+                                writeln!(output, "case Status.OutOfEnergy(var _): InternalOnUnhandledReducerError(ctx, new Exception(\"out of energy\")); break;");
+                            });
                         });
+                        writeln!(output, "return false;");
                     });
-                    writeln!(output, "return false;");
-                });
 
-                writeln!(output, "On{func_name_pascal_case}(");
-                // Write out arguments one per line
-                {
-                    indent_scope!(output);
-                    write!(output, "ctx");
-                    for (arg_name, _) in &reducer.params_for_generate {
-                        writeln!(output, ",");
-                        let arg_name = arg_name.deref().to_case(Case::Pascal);
-                        write!(output, "args.{arg_name}");
-                    }
-                    writeln!(output);
-                }
-                writeln!(output, ");");
-                writeln!(output, "return true;");
-            });
-        });
-
-        writeln!(output);
-
-        writeln!(output, "public abstract partial class Reducer");
-        indented_block(&mut output, |output| {
-            autogen_csharp_product_common(
-                module,
-                output,
-                reducer.accessor_name.deref().to_case(Case::Pascal),
-                &reducer.params_for_generate,
-                "Reducer, IReducerArgs",
-                |output| {
-                    if !reducer.params_for_generate.elements.is_empty() {
+                    writeln!(output, "On{func_name_pascal_case}(");
+                    // Write out arguments one per line
+                    {
+                        indent_scope!(output);
+                        write!(output, "ctx");
+                        for (arg_name, _) in &reducer.params_for_generate {
+                            writeln!(output, ",");
+                            let arg_name = arg_name.deref().to_case(Case::Pascal);
+                            write!(output, "args.{arg_name}");
+                        }
                         writeln!(output);
                     }
-                    writeln!(output, "string IReducerArgs.ReducerName => \"{}\";", reducer.name);
-                },
-            );
-        });
+                    writeln!(output, ");");
+                    writeln!(output, "return true;");
+                });
+            });
 
-        OutputFile {
-            filename: format!("Reducers/{}.g.cs", reducer.accessor_name.deref().to_case(Case::Pascal)),
-            code: output.into_inner(),
-        }
+            writeln!(output);
+
+            writeln!(output, "public abstract partial class Reducer");
+            indented_block(&mut output, |output| {
+                autogen_csharp_product_common(
+                    module,
+                    output,
+                    reducer.accessor_name.deref().to_case(Case::Pascal),
+                    &reducer.params_for_generate,
+                    "Reducer, IReducerArgs",
+                    |output| {
+                        if !reducer.params_for_generate.elements.is_empty() {
+                            writeln!(output);
+                        }
+                        writeln!(output, "string IReducerArgs.ReducerName => \"{}\";", reducer.name);
+                    },
+                );
+            });
+
+            OutputFile {
+                filename: format!("Reducers/{}.g.cs", reducer.accessor_name.deref().to_case(Case::Pascal)),
+                code: output.into_inner(),
+            }
+        })
     }
 
     fn generate_procedure_file(
         &self,
         module: &ModuleDef,
         procedure: &spacetimedb_schema::def::ProcedureDef,
-    ) -> OutputFile {
-        let mut output = CsharpAutogen::new(
-            self.namespace,
-            &[
-                "SpacetimeDB.ClientApi",
-                "System.Collections.Generic",
-                "System.Runtime.Serialization",
-            ],
-            false,
-        );
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = CsharpAutogen::new(
+                self.namespace,
+                &[
+                    "SpacetimeDB.ClientApi",
+                    "System.Collections.Generic",
+                    "System.Runtime.Serialization",
+                ],
+                false,
+            );
 
-        writeln!(output, "public sealed partial class RemoteProcedures : RemoteBase");
-        indented_block(&mut output, |output| {
-            let func_name_pascal_case = procedure.accessor_name.deref().to_case(Case::Pascal);
-            let delegate_separator = if procedure.params_for_generate.elements.is_empty() {
-                ""
-            } else {
-                ", "
-            };
+            writeln!(output, "public sealed partial class RemoteProcedures : RemoteBase");
+            indented_block(&mut output, |output| {
+                let func_name_pascal_case = procedure.accessor_name.deref().to_case(Case::Pascal);
+                let delegate_separator = if procedure.params_for_generate.elements.is_empty() {
+                    ""
+                } else {
+                    ", "
+                };
 
-            let (func_params, func_args) =
-                build_func_params_and_args(module, procedure.params_for_generate.into_iter(), self.namespace);
-            let return_type_str = ty_fmt_with_ns(module, &procedure.return_type_for_generate, self.namespace);
-            // Generate the clean public API that users call to allow us of BSATN.Decode<> then reflect to the proper return type
-            writeln!(
+                let (func_params, func_args) =
+                    build_func_params_and_args(module, procedure.params_for_generate.into_iter(), self.namespace);
+                let return_type_str = ty_fmt_with_ns(module, &procedure.return_type_for_generate, self.namespace);
+                // Generate the clean public API that users call to allow us of BSATN.Decode<> then reflect to the proper return type
+                writeln!(
                 output,
                 "public void {func_name_pascal_case}({func_params}{delegate_separator}ProcedureCallback<{return_type_str}> callback)"
             );
-            indented_block(output, |output| {
-                writeln!(output, "// Convert the clean callback to the wrapper callback");
+                indented_block(output, |output| {
+                    writeln!(output, "// Convert the clean callback to the wrapper callback");
+                    writeln!(
+                        output,
+                        "Internal{func_name_pascal_case}({func_args}{delegate_separator}(ctx, result) => {{"
+                    );
+
+                    writeln!(output, "if (result.IsSuccess && result.Value != null)");
+                    indented_block(output, |output| {
+                        writeln!(
+                            output,
+                            "callback(ctx, ProcedureCallbackResult<{return_type_str}>.Success(result.Value.Value));"
+                        );
+                    });
+                    writeln!(output, "else");
+                    indented_block(output, |output| {
+                        writeln!(
+                            output,
+                            "callback(ctx, ProcedureCallbackResult<{return_type_str}>.Failure(result.Error!));"
+                        );
+                    });
+                    writeln!(output, "}});");
+                });
+                writeln!(output);
+
+                // Generate the private wrapper method that handles BSATN
                 writeln!(
-                    output,
-                    "Internal{func_name_pascal_case}({func_args}{delegate_separator}(ctx, result) => {{"
-                );
-
-                writeln!(output, "if (result.IsSuccess && result.Value != null)");
-                indented_block(output, |output| {
-                    writeln!(
-                        output,
-                        "callback(ctx, ProcedureCallbackResult<{return_type_str}>.Success(result.Value.Value));"
-                    );
-                });
-                writeln!(output, "else");
-                indented_block(output, |output| {
-                    writeln!(
-                        output,
-                        "callback(ctx, ProcedureCallbackResult<{return_type_str}>.Failure(result.Error!));"
-                    );
-                });
-                writeln!(output, "}});");
-            });
-            writeln!(output);
-
-            // Generate the private wrapper method that handles BSATN
-            writeln!(
                 output,
                 "private void Internal{func_name_pascal_case}({func_params}{delegate_separator}ProcedureCallback<Procedure.{func_name_pascal_case}> callback)"
             );
-            indented_block(output, |output| {
+                indented_block(output, |output| {
+                    writeln!(
+                        output,
+                        "conn.InternalCallProcedure(new Procedure.{func_name_pascal_case}Args({func_args}), callback);"
+                    );
+                });
+                writeln!(output);
+            });
+
+            writeln!(output);
+
+            writeln!(output, "public abstract partial class Procedure");
+            indented_block(&mut output, |output| {
+                autogen_csharp_proc_return(
+                    module,
+                    output,
+                    procedure.accessor_name.deref().to_case(Case::Pascal).to_string(),
+                    &procedure.return_type_for_generate,
+                    self.namespace,
+                );
+                autogen_csharp_product_common(
+                    module,
+                    output,
+                    format!("{}Args", procedure.accessor_name.deref().to_case(Case::Pascal)),
+                    &procedure.params_for_generate,
+                    "Procedure, IProcedureArgs",
+                    |output| {
+                        if !procedure.params_for_generate.elements.is_empty() {
+                            writeln!(output);
+                        }
+                        writeln!(output, "string IProcedureArgs.ProcedureName => \"{}\";", procedure.name);
+                    },
+                );
+                writeln!(output);
+            });
+
+            OutputFile {
+                filename: format!(
+                    "Procedures/{}.g.cs",
+                    procedure.accessor_name.deref().to_case(Case::Pascal)
+                ),
+                code: output.into_inner(),
+            }
+        })
+    }
+
+    fn generate_global_files(
+        &self,
+        module: &ModuleDef,
+        options: &CodegenOptions,
+    ) -> Result<Vec<OutputFile>, crate::CodegenError> {
+        Ok({
+            let mut output = CsharpAutogen::new(
+                self.namespace,
+                &[
+                    "SpacetimeDB.ClientApi",
+                    "System.Collections.Generic",
+                    "System.Runtime.Serialization",
+                ],
+                true, // print the version in the globals file
+            );
+
+            writeln!(output, "public sealed partial class RemoteReducers : RemoteBase");
+            indented_block(&mut output, |output| {
+                writeln!(output, "internal RemoteReducers(DbConnection conn) : base(conn) {{ }}");
                 writeln!(
                     output,
-                    "conn.InternalCallProcedure(new Procedure.{func_name_pascal_case}Args({func_args}), callback);"
+                    "internal event Action<ReducerEventContext, Exception>? InternalOnUnhandledReducerError;"
+                )
+            });
+            writeln!(output);
+
+            writeln!(output, "public sealed partial class RemoteProcedures : RemoteBase");
+            indented_block(&mut output, |output| {
+                writeln!(
+                    output,
+                    "internal RemoteProcedures(DbConnection conn) : base(conn) {{ }}"
                 );
             });
             writeln!(output);
-        });
 
-        writeln!(output);
-
-        writeln!(output, "public abstract partial class Procedure");
-        indented_block(&mut output, |output| {
-            autogen_csharp_proc_return(
-                module,
-                output,
-                procedure.accessor_name.deref().to_case(Case::Pascal).to_string(),
-                &procedure.return_type_for_generate,
-                self.namespace,
-            );
-            autogen_csharp_product_common(
-                module,
-                output,
-                format!("{}Args", procedure.accessor_name.deref().to_case(Case::Pascal)),
-                &procedure.params_for_generate,
-                "Procedure, IProcedureArgs",
-                |output| {
-                    if !procedure.params_for_generate.elements.is_empty() {
-                        writeln!(output);
+            writeln!(output, "public sealed partial class RemoteTables : RemoteTablesBase");
+            indented_block(&mut output, |output| {
+                writeln!(output, "public RemoteTables(DbConnection conn)");
+                indented_block(output, |output| {
+                    for (_, accessor_name, _) in iter_table_names_and_types(module, options.visibility) {
+                        writeln!(
+                            output,
+                            "AddTable({} = new(conn));",
+                            accessor_name.deref().to_case(Case::Pascal)
+                        );
                     }
-                    writeln!(output, "string IProcedureArgs.ProcedureName => \"{}\";", procedure.name);
-                },
-            );
-            writeln!(output);
-        });
-
-        OutputFile {
-            filename: format!(
-                "Procedures/{}.g.cs",
-                procedure.accessor_name.deref().to_case(Case::Pascal)
-            ),
-            code: output.into_inner(),
-        }
-    }
-
-    fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
-        let mut output = CsharpAutogen::new(
-            self.namespace,
-            &[
-                "SpacetimeDB.ClientApi",
-                "System.Collections.Generic",
-                "System.Runtime.Serialization",
-            ],
-            true, // print the version in the globals file
-        );
-
-        writeln!(output, "public sealed partial class RemoteReducers : RemoteBase");
-        indented_block(&mut output, |output| {
-            writeln!(output, "internal RemoteReducers(DbConnection conn) : base(conn) {{ }}");
-            writeln!(
-                output,
-                "internal event Action<ReducerEventContext, Exception>? InternalOnUnhandledReducerError;"
-            )
-        });
-        writeln!(output);
-
-        writeln!(output, "public sealed partial class RemoteProcedures : RemoteBase");
-        indented_block(&mut output, |output| {
-            writeln!(
-                output,
-                "internal RemoteProcedures(DbConnection conn) : base(conn) {{ }}"
-            );
-        });
-        writeln!(output);
-
-        writeln!(output, "public sealed partial class RemoteTables : RemoteTablesBase");
-        indented_block(&mut output, |output| {
-            writeln!(output, "public RemoteTables(DbConnection conn)");
-            indented_block(output, |output| {
-                for (_, accessor_name, _) in iter_table_names_and_types(module, options.visibility) {
-                    writeln!(
-                        output,
-                        "AddTable({} = new(conn));",
-                        accessor_name.deref().to_case(Case::Pascal)
-                    );
-                }
+                });
             });
-        });
-        writeln!(output);
-
-        writeln!(output, "{REDUCER_EVENTS}");
-
-        writeln!(output, "public sealed class QueryBuilder");
-        indented_block(&mut output, |output| {
-            writeln!(output, "public From From {{ get; }} = new();");
             writeln!(output);
-            writeln!(output, "internal static string[] AllTablesSqlQueries() => new string[]");
-            indented_block(output, |output| {
-                for (_, accessor_name, _) in iter_table_names_and_types(module, options.visibility) {
+
+            writeln!(output, "{REDUCER_EVENTS}");
+
+            writeln!(output, "public sealed class QueryBuilder");
+            indented_block(&mut output, |output| {
+                writeln!(output, "public From From {{ get; }} = new();");
+                writeln!(output);
+                writeln!(output, "internal static string[] AllTablesSqlQueries() => new string[]");
+                indented_block(output, |output| {
+                    for (_, accessor_name, _) in iter_table_names_and_types(module, options.visibility) {
+                        let method_name = accessor_name.deref().to_case(Case::Pascal);
+                        writeln!(output, "new QueryBuilder().From.{method_name}().ToSql(),");
+                    }
+                });
+                writeln!(output, ";");
+            });
+            writeln!(output);
+
+            writeln!(output, "public sealed class From");
+            indented_block(&mut output, |output| {
+                for (name, accessor_name, product_type_ref) in iter_table_names_and_types(module, options.visibility) {
                     let method_name = accessor_name.deref().to_case(Case::Pascal);
-                    writeln!(output, "new QueryBuilder().From.{method_name}().ToSql(),");
-                }
-            });
-            writeln!(output, ";");
-        });
-        writeln!(output);
-
-        writeln!(output, "public sealed class From");
-        indented_block(&mut output, |output| {
-            for (name, accessor_name, product_type_ref) in iter_table_names_and_types(module, options.visibility) {
-                let method_name = accessor_name.deref().to_case(Case::Pascal);
-                let row_type = type_ref_name(module, product_type_ref);
-                let table_name_lit = format!("{:?}", name.deref());
-                writeln!(
+                    let row_type = type_ref_name(module, product_type_ref);
+                    let table_name_lit = format!("{:?}", name.deref());
+                    writeln!(
                     output,
                     "public global::SpacetimeDB.Table<{row_type}, {method_name}Cols, {method_name}IxCols> {method_name}() => new({table_name_lit}, new {method_name}Cols({table_name_lit}), new {method_name}IxCols({table_name_lit}));"
                 );
-            }
-        });
-        writeln!(output);
-
-        writeln!(output, "public sealed class TypedSubscriptionBuilder");
-        indented_block(&mut output, |output| {
-            writeln!(output, "private readonly IDbConnection conn;");
-            writeln!(output, "private Action<SubscriptionEventContext>? Applied;");
-            writeln!(output, "private Action<ErrorContext, Exception>? Error;");
-            writeln!(output, "private readonly List<string> querySqls = new();");
+                }
+            });
             writeln!(output);
 
-            writeln!(
+            writeln!(output, "public sealed class TypedSubscriptionBuilder");
+            indented_block(&mut output, |output| {
+                writeln!(output, "private readonly IDbConnection conn;");
+                writeln!(output, "private Action<SubscriptionEventContext>? Applied;");
+                writeln!(output, "private Action<ErrorContext, Exception>? Error;");
+                writeln!(output, "private readonly List<string> querySqls = new();");
+                writeln!(output);
+
+                writeln!(
                 output,
                 "internal TypedSubscriptionBuilder(IDbConnection conn, Action<SubscriptionEventContext>? applied, Action<ErrorContext, Exception>? error)"
             );
-            indented_block(output, |output| {
-                writeln!(output, "this.conn = conn;");
-                writeln!(output, "Applied = applied;");
-                writeln!(output, "Error = error;");
+                indented_block(output, |output| {
+                    writeln!(output, "this.conn = conn;");
+                    writeln!(output, "Applied = applied;");
+                    writeln!(output, "Error = error;");
+                });
+                writeln!(output);
+
+                writeln!(
+                    output,
+                    "public TypedSubscriptionBuilder OnApplied(Action<SubscriptionEventContext> callback)"
+                );
+                indented_block(output, |output| {
+                    writeln!(output, "Applied += callback;");
+                    writeln!(output, "return this;");
+                });
+                writeln!(output);
+
+                writeln!(
+                    output,
+                    "public TypedSubscriptionBuilder OnError(Action<ErrorContext, Exception> callback)"
+                );
+                indented_block(output, |output| {
+                    writeln!(output, "Error += callback;");
+                    writeln!(output, "return this;");
+                });
+                writeln!(output);
+
+                writeln!(output, "public TypedSubscriptionBuilder AddQuery<TRow>(Func<QueryBuilder, global::SpacetimeDB.IQuery<TRow>> build)");
+                indented_block(output, |output| {
+                    writeln!(output, "var qb = new QueryBuilder();");
+                    writeln!(output, "querySqls.Add(build(qb).ToSql());");
+                    writeln!(output, "return this;");
+                });
+                writeln!(output);
+
+                writeln!(
+                    output,
+                    "public SubscriptionHandle Subscribe() => new(conn, Applied, Error, querySqls.ToArray());"
+                );
+            });
+            writeln!(output);
+
+            writeln!(output, "public abstract partial class Reducer");
+            indented_block(&mut output, |output| {
+                // Prevent instantiation of this class from outside.
+                writeln!(output, "private Reducer() {{ }}");
+            });
+            writeln!(output);
+
+            writeln!(output, "public abstract partial class Procedure");
+            indented_block(&mut output, |output| {
+                // Prevent instantiation of this class from outside.
+                writeln!(output, "private Procedure() {{ }}");
             });
             writeln!(output);
 
             writeln!(
                 output,
-                "public TypedSubscriptionBuilder OnApplied(Action<SubscriptionEventContext> callback)"
+                "public sealed class DbConnection : DbConnectionBase<DbConnection, RemoteTables, Reducer>"
             );
-            indented_block(output, |output| {
-                writeln!(output, "Applied += callback;");
-                writeln!(output, "return this;");
-            });
-            writeln!(output);
+            indented_block(&mut output, |output: &mut CodeIndenter<String>| {
+                writeln!(output, "public override RemoteTables Db {{ get; }}");
+                writeln!(output, "public readonly RemoteReducers Reducers;");
+                writeln!(output, "public readonly RemoteProcedures Procedures;");
+                writeln!(output);
 
-            writeln!(
-                output,
-                "public TypedSubscriptionBuilder OnError(Action<ErrorContext, Exception> callback)"
-            );
-            indented_block(output, |output| {
-                writeln!(output, "Error += callback;");
-                writeln!(output, "return this;");
-            });
-            writeln!(output);
+                writeln!(output, "public DbConnection()");
+                indented_block(output, |output| {
+                    writeln!(output, "Db = new(this);");
+                    writeln!(output, "Reducers = new(this);");
+                    writeln!(output, "Procedures = new(this);");
+                });
+                writeln!(output);
 
-            writeln!(output, "public TypedSubscriptionBuilder AddQuery<TRow>(Func<QueryBuilder, global::SpacetimeDB.IQuery<TRow>> build)");
-            indented_block(output, |output| {
-                writeln!(output, "var qb = new QueryBuilder();");
-                writeln!(output, "querySqls.Add(build(qb).ToSql());");
-                writeln!(output, "return this;");
-            });
-            writeln!(output);
+                writeln!(
+                    output,
+                    "protected override IEventContext ToEventContext(Event<Reducer> Event) =>"
+                );
+                writeln!(output, "new EventContext(this, Event);");
+                writeln!(output);
 
-            writeln!(
-                output,
-                "public SubscriptionHandle Subscribe() => new(conn, Applied, Error, querySqls.ToArray());"
-            );
-        });
-        writeln!(output);
-
-        writeln!(output, "public abstract partial class Reducer");
-        indented_block(&mut output, |output| {
-            // Prevent instantiation of this class from outside.
-            writeln!(output, "private Reducer() {{ }}");
-        });
-        writeln!(output);
-
-        writeln!(output, "public abstract partial class Procedure");
-        indented_block(&mut output, |output| {
-            // Prevent instantiation of this class from outside.
-            writeln!(output, "private Procedure() {{ }}");
-        });
-        writeln!(output);
-
-        writeln!(
-            output,
-            "public sealed class DbConnection : DbConnectionBase<DbConnection, RemoteTables, Reducer>"
-        );
-        indented_block(&mut output, |output: &mut CodeIndenter<String>| {
-            writeln!(output, "public override RemoteTables Db {{ get; }}");
-            writeln!(output, "public readonly RemoteReducers Reducers;");
-            writeln!(output, "public readonly RemoteProcedures Procedures;");
-            writeln!(output);
-
-            writeln!(output, "public DbConnection()");
-            indented_block(output, |output| {
-                writeln!(output, "Db = new(this);");
-                writeln!(output, "Reducers = new(this);");
-                writeln!(output, "Procedures = new(this);");
-            });
-            writeln!(output);
-
-            writeln!(
-                output,
-                "protected override IEventContext ToEventContext(Event<Reducer> Event) =>"
-            );
-            writeln!(output, "new EventContext(this, Event);");
-            writeln!(output);
-
-            writeln!(
+                writeln!(
                 output,
                 "protected override IReducerEventContext ToReducerEventContext(ReducerEvent<Reducer> reducerEvent) =>"
             );
-            writeln!(output, "new ReducerEventContext(this, reducerEvent);");
-            writeln!(output);
+                writeln!(output, "new ReducerEventContext(this, reducerEvent);");
+                writeln!(output);
 
-            writeln!(
-                output,
-                "protected override ISubscriptionEventContext MakeSubscriptionEventContext() =>"
-            );
-            writeln!(output, "new SubscriptionEventContext(this);");
-            writeln!(output);
+                writeln!(
+                    output,
+                    "protected override ISubscriptionEventContext MakeSubscriptionEventContext() =>"
+                );
+                writeln!(output, "new SubscriptionEventContext(this);");
+                writeln!(output);
 
-            writeln!(
-                output,
-                "protected override IErrorContext ToErrorContext(Exception exception) =>"
-            );
-            writeln!(output, "new ErrorContext(this, exception);");
-            writeln!(output);
+                writeln!(
+                    output,
+                    "protected override IErrorContext ToErrorContext(Exception exception) =>"
+                );
+                writeln!(output, "new ErrorContext(this, exception);");
+                writeln!(output);
 
-            writeln!(
+                writeln!(
                 output,
                 "protected override IProcedureEventContext ToProcedureEventContext(ProcedureEvent procedureEvent) =>"
             );
-            writeln!(output, "new ProcedureEventContext(this, procedureEvent);");
-            writeln!(output);
+                writeln!(output, "new ProcedureEventContext(this, procedureEvent);");
+                writeln!(output);
 
-            writeln!(
-                output,
-                "protected override bool Dispatch(IReducerEventContext context, Reducer reducer)"
-            );
-            indented_block(output, |output| {
-                writeln!(output, "var eventContext = (ReducerEventContext)context;");
-                writeln!(output, "return reducer switch {{");
-                {
-                    indent_scope!(output);
-                    for reducer_name in
-                        iter_reducers(module, options.visibility).map(|r| r.accessor_name.deref().to_case(Case::Pascal))
+                writeln!(
+                    output,
+                    "protected override bool Dispatch(IReducerEventContext context, Reducer reducer)"
+                );
+                indented_block(output, |output| {
+                    writeln!(output, "var eventContext = (ReducerEventContext)context;");
+                    writeln!(output, "return reducer switch {{");
                     {
+                        indent_scope!(output);
+                        for reducer_name in iter_reducers(module, options.visibility)
+                            .map(|r| r.accessor_name.deref().to_case(Case::Pascal))
+                        {
+                            writeln!(
+                                output,
+                                "Reducer.{reducer_name} args => Reducers.Invoke{reducer_name}(eventContext, args),"
+                            );
+                        }
                         writeln!(
                             output,
-                            "Reducer.{reducer_name} args => Reducers.Invoke{reducer_name}(eventContext, args),"
+                            r#"_ => throw new ArgumentOutOfRangeException("Reducer", $"Unknown reducer {{reducer}}")"#
                         );
                     }
-                    writeln!(
-                        output,
-                        r#"_ => throw new ArgumentOutOfRangeException("Reducer", $"Unknown reducer {{reducer}}")"#
-                    );
-                }
-                writeln!(output, "}};");
-            });
-            writeln!(output);
+                    writeln!(output, "}};");
+                });
+                writeln!(output);
 
-            writeln!(output, "public SubscriptionBuilder SubscriptionBuilder() => new(this);");
-            writeln!(
-                output,
-                "public event Action<ReducerEventContext, Exception> OnUnhandledReducerError"
-            );
-            indented_block(output, |output| {
-                writeln!(output, "add => Reducers.InternalOnUnhandledReducerError += value;");
-                writeln!(output, "remove => Reducers.InternalOnUnhandledReducerError -= value;");
+                writeln!(output, "public SubscriptionBuilder SubscriptionBuilder() => new(this);");
+                writeln!(
+                    output,
+                    "public event Action<ReducerEventContext, Exception> OnUnhandledReducerError"
+                );
+                indented_block(output, |output| {
+                    writeln!(output, "add => Reducers.InternalOnUnhandledReducerError += value;");
+                    writeln!(output, "remove => Reducers.InternalOnUnhandledReducerError -= value;");
+                });
             });
-        });
 
-        vec![OutputFile {
-            filename: "SpacetimeDBClient.g.cs".to_owned(),
-            code: output.into_inner(),
-        }]
+            vec![OutputFile {
+                filename: "SpacetimeDBClient.g.cs".to_owned(),
+                code: output.into_inner(),
+            }]
+        })
     }
 }
 

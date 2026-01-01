@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
 use once_cell::sync::Lazy;
-use spacetimedb::messages::control_db::HostType;
 use spacetimedb_client_api::auth::LOCALHOST;
+use spacetimedb_core::messages::control_db::HostType;
 use spacetimedb_lib::error::ResultTest;
 use spacetimedb_lib::Hash;
 use tempfile::TempDir;

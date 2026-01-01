@@ -3,7 +3,7 @@ use axum::response::IntoResponse;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use spacetimedb::energy::EnergyQuanta;
+use spacetimedb_core::energy::EnergyQuanta;
 use spacetimedb_lib::Identity;
 
 use crate::auth::SpacetimeAuthRequired;

@@ -214,7 +214,7 @@ class AuthCtxImpl implements AuthCtx {
 
 // Using a class expression rather than declaration keeps the class out of the
 // type namespace, so that `ReducerCtx` still refers to the interface.
-export const ReducerCtxImpl = class ReducerCtx<
+class ReducerCtxImplClass<
   SchemaDef extends UntypedSchemaDef,
 > implements IReducerCtx<SchemaDef>
 {
@@ -291,6 +291,8 @@ export const ReducerCtxImpl = class ReducerCtx<
     return Uuid.fromCounterV7(counter, this.timestamp, bytes);
   }
 };
+
+export const ReducerCtxImpl = ReducerCtxImplClass;
 
 /**
  * Call into a user function `fn` - the backtrace from an exception thrown in

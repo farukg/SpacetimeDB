@@ -483,7 +483,7 @@ impl Lang for Cpp<'_> {
         module: &ModuleDef,
         table: &TableDef,
         _schema: TableSchema,
-    ) -> OutputFile {
+    ) -> Result<OutputFile, crate::CodegenError> {
         let mut output = String::new();
         self.write_header_comment(&mut output);
         self.write_standard_includes(&mut output);
@@ -509,10 +509,10 @@ impl Lang for Cpp<'_> {
 
         writeln!(output, "}} // namespace {}", self.namespace).unwrap();
 
-        OutputFile {
+        Ok(OutputFile {
             filename: format!("{}.g.h", table.name),
             code: output,
-        }
+        })
     }
 
     fn generate_type_files(&self, module: &ModuleDef, type_def: &TypeDef) -> Vec<OutputFile> {
@@ -578,55 +578,67 @@ impl Lang for Cpp<'_> {
         }]
     }
 
-    fn generate_reducer_file(&self, _module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
-        let mut output = String::new();
-        self.write_header_comment(&mut output);
-        self.write_standard_includes(&mut output);
+    fn generate_reducer_file(
+        &self,
+        _module: &ModuleDef,
+        reducer: &ReducerDef,
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = String::new();
+            self.write_header_comment(&mut output);
+            self.write_standard_includes(&mut output);
 
-        writeln!(output).unwrap();
-        writeln!(output, "namespace {} {{", self.namespace).unwrap();
-        writeln!(output).unwrap();
+            writeln!(output).unwrap();
+            writeln!(output, "namespace {} {{", self.namespace).unwrap();
+            writeln!(output).unwrap();
 
-        writeln!(output, "// Reducer: {}", reducer.name).unwrap();
-        writeln!(output, "// This file is intentionally minimal - reducer implementation").unwrap();
-        writeln!(output, "// is handled by the SpacetimeDB framework.").unwrap();
+            writeln!(output, "// Reducer: {}", reducer.name).unwrap();
+            writeln!(output, "// This file is intentionally minimal - reducer implementation").unwrap();
+            writeln!(output, "// is handled by the SpacetimeDB framework.").unwrap();
 
-        writeln!(output, "}} // namespace {}", self.namespace).unwrap();
-        OutputFile {
-            filename: format!("{}.g.h", reducer.name),
-            code: output,
-        }
+            writeln!(output, "}} // namespace {}", self.namespace).unwrap();
+            OutputFile {
+                filename: format!("{}.g.h", reducer.name),
+                code: output,
+            }
+        })
     }
 
     fn generate_procedure_file(
         &self,
         _module: &ModuleDef,
         procedure: &spacetimedb_schema::def::ProcedureDef,
-    ) -> OutputFile {
-        let mut output = String::new();
-        self.write_header_comment(&mut output);
-        self.write_standard_includes(&mut output);
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let mut output = String::new();
+            self.write_header_comment(&mut output);
+            self.write_standard_includes(&mut output);
 
-        writeln!(output).unwrap();
-        writeln!(output, "namespace {} {{", self.namespace).unwrap();
-        writeln!(output).unwrap();
+            writeln!(output).unwrap();
+            writeln!(output, "namespace {} {{", self.namespace).unwrap();
+            writeln!(output).unwrap();
 
-        writeln!(output, "// Procedure: {}", procedure.name).unwrap();
-        writeln!(
-            output,
-            "// This file is intentionally minimal - procedure implementation"
-        )
-        .unwrap();
-        writeln!(output, "// is handled by the SpacetimeDB framework.").unwrap();
+            writeln!(output, "// Procedure: {}", procedure.name).unwrap();
+            writeln!(
+                output,
+                "// This file is intentionally minimal - procedure implementation"
+            )
+            .unwrap();
+            writeln!(output, "// is handled by the SpacetimeDB framework.").unwrap();
 
-        writeln!(output, "}} // namespace {}", self.namespace).unwrap();
-        OutputFile {
-            filename: format!("{}.g.h", procedure.name),
-            code: output,
-        }
+            writeln!(output, "}} // namespace {}", self.namespace).unwrap();
+            OutputFile {
+                filename: format!("{}.g.h", procedure.name),
+                code: output,
+            }
+        })
     }
 
-    fn generate_global_files(&self, _module: &ModuleDef, _options: &CodegenOptions) -> Vec<OutputFile> {
-        vec![]
+    fn generate_global_files(
+        &self,
+        _module: &ModuleDef,
+        _options: &CodegenOptions,
+    ) -> Result<Vec<OutputFile>, crate::CodegenError> {
+        Ok(vec![])
     }
 }

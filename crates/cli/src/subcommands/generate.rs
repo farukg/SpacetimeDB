@@ -5,6 +5,10 @@ use clap::parser::ValueSource;
 use clap::Arg;
 use clap::ArgAction::{Set, SetTrue};
 use fs_err as fs;
+#[cfg(feature = "rescript")]
+use spacetimedb_codegen::rescript::config as rescript_config;
+#[cfg(feature = "rescript")]
+use spacetimedb_codegen::ReScript;
 use spacetimedb_codegen::{
     generate, private_table_names, CodegenOptions, CodegenVisibility, Csharp, Lang, OutputFile, Rust, TypeScript,
     UnrealCpp, AUTO_GENERATED_PREFIX,
@@ -390,6 +394,9 @@ fn prepare_generate_run_configs<'a>(
 }
 
 fn detect_default_language(client_project_dir: &Path) -> anyhow::Result<Language> {
+    if client_project_dir.join("rescript.json").exists() {
+        return Ok(Language::ReScript);
+    }
     if client_project_dir.join("package.json").exists() {
         return Ok(Language::TypeScript);
     }
@@ -415,6 +422,7 @@ fn language_cli_name(lang: Language) -> &'static str {
     match lang {
         Language::Rust => "rust",
         Language::Csharp => "csharp",
+        Language::ReScript => "rescript",
         Language::TypeScript => "typescript",
         Language::UnrealCpp => "unrealcpp",
     }
@@ -422,7 +430,7 @@ fn language_cli_name(lang: Language) -> &'static str {
 
 pub fn default_out_dir_for_language(lang: Language) -> Option<PathBuf> {
     match lang {
-        Language::Rust | Language::TypeScript => Some(PathBuf::from("src/module_bindings")),
+        Language::Rust | Language::TypeScript | Language::ReScript => Some(PathBuf::from("src/module_bindings")),
         Language::Csharp => Some(PathBuf::from("module_bindings")),
         Language::UnrealCpp => None,
     }
@@ -459,6 +467,7 @@ pub async fn run_prepared_generate_configs(
     json_module: Option<Vec<PathBuf>>,
     force: bool,
     namespace_from_cli: bool,
+    #[cfg(feature = "rescript")] config_dir: Option<&Path>,
 ) -> anyhow::Result<()> {
     for run in run_configs {
         println!(
@@ -509,6 +518,8 @@ pub async fn run_prepared_generate_configs(
 
         let csharp_lang;
         let unreal_cpp_lang;
+        #[cfg(feature = "rescript")]
+        let rescript_lang;
         let gen_lang = match run.lang {
             Language::Csharp => {
                 csharp_lang = Csharp {
@@ -525,10 +536,33 @@ pub async fn run_prepared_generate_configs(
                 &unreal_cpp_lang as &dyn Lang
             }
             Language::Rust => &Rust,
+            #[cfg(feature = "rescript")]
+            Language::ReScript => {
+                let search_paths = rescript_config_search_paths(&run.out_dir, config_dir);
+                let rescript_config =
+                    rescript_config::load_config(&search_paths).context("failed to load stdb-codegen.toml")?;
+                let jsx_module = read_jsx_module(&search_paths);
+                rescript_lang = ReScript {
+                    root_module: rescript_config.root_module,
+                    output_dir_strategy: rescript_config.output_dir_strategy,
+                    emit_display: rescript_config.emit_display,
+                    jsx_module,
+                    out_dir: Some(run.out_dir.clone()),
+                    refined_types: rescript_config.refined_types,
+                    plain_enum_ingress: rescript_config.plain_enum_ingress,
+                };
+                &rescript_lang as &dyn Lang
+            }
+            #[cfg(not(feature = "rescript"))]
+            Language::ReScript => {
+                anyhow::bail!("ReScript codegen requires building with --features rescript");
+            }
             Language::TypeScript => &TypeScript,
         };
 
-        for OutputFile { filename, code } in generate(&module, gen_lang, &options) {
+        for OutputFile { filename, code } in
+            generate(&module, gen_lang, &options).context("client code generation failed")?
+        {
             let fname = Path::new(&filename);
             if let Some(parent) = fname.parent().filter(|p| !p.as_os_str().is_empty()) {
                 println!("Creating directory {}", run.out_dir.join(parent).display());
@@ -595,6 +629,11 @@ pub async fn run_prepared_generate_configs(
     Ok(())
 }
 
+#[cfg(feature = "rescript")]
+fn rescript_config_search_paths<'a>(out_dir: &'a Path, config_dir: Option<&'a Path>) -> Vec<&'a Path> {
+    config_dir.into_iter().chain(std::iter::once(out_dir)).collect()
+}
+
 /// Like `exec`, but lets you specify a custom a function to extract a schema from a file.
 pub async fn exec_ex(
     _config: Config,
@@ -651,6 +690,8 @@ pub async fn exec_ex(
         json_module,
         force,
         namespace_from_cli,
+        #[cfg(feature = "rescript")]
+        config_dir,
     )
     .await
 }
@@ -677,7 +718,16 @@ pub async fn exec_from_entries(
         .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
     let run_configs = prepare_generate_run_configs(generate_configs, true, config_dir)?;
-    run_prepared_generate_configs(run_configs, extract_descriptions, None, force, false).await
+    run_prepared_generate_configs(
+        run_configs,
+        extract_descriptions,
+        None,
+        force,
+        false,
+        #[cfg(feature = "rescript")]
+        config_dir,
+    )
+    .await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
@@ -685,6 +735,8 @@ pub async fn exec_from_entries(
 pub enum Language {
     Csharp,
     TypeScript,
+    #[serde(alias = "res")]
+    ReScript,
     Rust,
     #[serde(alias = "uecpp", alias = "ue5cpp", alias = "unreal")]
     UnrealCpp,
@@ -692,12 +744,19 @@ pub enum Language {
 
 impl clap::ValueEnum for Language {
     fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Csharp, Self::TypeScript, Self::Rust, Self::UnrealCpp]
+        &[
+            Self::Csharp,
+            Self::TypeScript,
+            Self::ReScript,
+            Self::Rust,
+            Self::UnrealCpp,
+        ]
     }
     fn to_possible_value(&self) -> Option<PossibleValue> {
         Some(match self {
             Self::Csharp => clap::builder::PossibleValue::new("csharp").aliases(["c#", "cs"]),
             Self::TypeScript => clap::builder::PossibleValue::new("typescript").aliases(["ts", "TS"]),
+            Self::ReScript => clap::builder::PossibleValue::new("rescript").aliases(["res", "RES"]),
             Self::Rust => clap::builder::PossibleValue::new("rust").aliases(["rs", "RS"]),
             Self::UnrealCpp => PossibleValue::new("unrealcpp").aliases(["uecpp", "ue5cpp", "unreal"]),
         })
@@ -710,6 +769,7 @@ impl Language {
         match self {
             Language::Rust => "Rust",
             Language::Csharp => "C#",
+            Language::ReScript => "ReScript",
             Language::TypeScript => "TypeScript",
             Language::UnrealCpp => "Unreal C++",
         }
@@ -719,6 +779,9 @@ impl Language {
         match self {
             Language::Rust => rustfmt(generated_files)?,
             Language::Csharp => dotnet_format(project_dir, generated_files)?,
+            Language::ReScript => {
+                // TODO: implement formatting.
+            }
             Language::TypeScript => {
                 // TODO: implement formatting.
             }
@@ -1100,6 +1163,26 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_rescript_language_from_client_project() {
+        let cmd = cli();
+        let schema = build_generate_config_schema(&cmd).unwrap();
+        let matches = cmd.clone().get_matches_from(vec!["generate"]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let module_dir = temp.path().join("spacetimedb");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        std::fs::write(temp.path().join("rescript.json"), "{\"name\":\"client\"}").unwrap();
+        let mut cfg = HashMap::new();
+        cfg.insert(
+            "module-path".to_string(),
+            serde_json::Value::String(module_dir.display().to_string()),
+        );
+        let command_config = CommandConfig::new(&schema, cfg, &matches).unwrap();
+        let runs = prepare_generate_run_configs(vec![command_config], true, Some(temp.path())).unwrap();
+        assert_eq!(runs[0].lang, Language::ReScript);
+        assert_eq!(runs[0].out_dir, temp.path().join("src/module_bindings"));
+    }
+
+    #[test]
     fn test_detect_csharp_language_from_client_project() {
         let cmd = cli();
         let schema = build_generate_config_schema(&cmd).unwrap();
@@ -1370,6 +1453,10 @@ mod tests {
             Language::TypeScript
         );
         assert_eq!(
+            serde_json::from_value::<Language>(serde_json::Value::String("rescript".into())).unwrap(),
+            Language::ReScript
+        );
+        assert_eq!(
             serde_json::from_value::<Language>(serde_json::Value::String("rust".into())).unwrap(),
             Language::Rust
         );
@@ -1379,6 +1466,10 @@ mod tests {
         );
 
         // Aliases
+        assert_eq!(
+            serde_json::from_value::<Language>(serde_json::Value::String("res".into())).unwrap(),
+            Language::ReScript
+        );
         assert_eq!(
             serde_json::from_value::<Language>(serde_json::Value::String("uecpp".into())).unwrap(),
             Language::UnrealCpp
@@ -1395,4 +1486,29 @@ mod tests {
         // Invalid language should error
         assert!(serde_json::from_value::<Language>(serde_json::Value::String("java".into())).is_err());
     }
+}
+/// Read the consumer's `jsx.module` from `rescript.json`.
+#[cfg(feature = "rescript")]
+fn read_jsx_module(search_paths: &[&Path]) -> String {
+    const DEFAULT_JSX_MODULE: &str = "React";
+    for dir in search_paths {
+        for candidate_dir in dir.ancestors() {
+            let candidate = candidate_dir.join("rescript.json");
+            let Ok(bytes) = fs::read(&candidate) else {
+                continue;
+            };
+            let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                continue;
+            };
+            match json
+                .get("jsx")
+                .and_then(|jsx| jsx.get("module"))
+                .and_then(|m| m.as_str())
+            {
+                Some(module) => return module.to_string(),
+                None => return DEFAULT_JSX_MODULE.to_string(),
+            }
+        }
+    }
+    DEFAULT_JSX_MODULE.to_string()
 }

@@ -93,6 +93,7 @@ path-clean = "1.0.1"
 [dev-dependencies]
 pretty_assertions.workspace = true
 fs_extra.workspace = true
+tempfile.workspace = true
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true }
@@ -102,6 +103,7 @@ tikv-jemalloc-ctl = { workspace = true }
 windows-sys = { workspace = true, features = ["Win32_System_Console"] }
 
 [build-dependencies]
+ignore.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 toml.workspace = true

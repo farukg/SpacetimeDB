@@ -1,4 +1,4 @@
-use spacetimedb::messages::control_db::HostType;
+use spacetimedb_core::messages::control_db::HostType;
 use spacetimedb_smoketests::{require_local_server, require_pnpm, Smoketest};
 
 const TS_MODULE_BASIC: &str = r#"import { schema, t, table } from "spacetimedb/server";

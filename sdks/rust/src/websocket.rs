@@ -489,8 +489,14 @@ impl WsConnection {
                         record_metrics(payload.len());
                     },
 
+                    Ok(Some(WebSocketMessage::Close(frame))) => {
+                        debug_log(&extra_logging, |file| writeln!(file, "Connection closed by peer {frame:?}"));
+                        log::info!("Connection closed by peer {frame:?}");
+                        break;
+                    },
+
                     Ok(Some(other)) => {
-                        debug_log(&extra_logging, |file| writeln!(file, "Unexpeccted WebSocket message {other:?}"));
+                        debug_log(&extra_logging, |file| writeln!(file, "Unexpected WebSocket message {other:?}"));
                         log::warn!("Unexpected WebSocket message {other:?}");
                         idle = false;
                         record_metrics(other.len());

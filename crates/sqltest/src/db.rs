@@ -2,7 +2,7 @@ use crate::pg::Pg;
 use crate::space::{Kind, SpaceDb};
 use crate::sqlite::Sqlite;
 use async_trait::async_trait;
-use spacetimedb::error::DBError;
+use spacetimedb_core::error::DBError;
 use sqllogictest::{AsyncDB, DBOutput};
 
 pub enum DBRunner {

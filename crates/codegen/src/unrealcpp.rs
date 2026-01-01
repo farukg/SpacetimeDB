@@ -37,7 +37,12 @@ impl UnrealCpp<'_> {
 }
 
 impl Lang for UnrealCpp<'_> {
-    fn generate_table_file_from_schema(&self, module: &ModuleDef, table: &TableDef, schema: TableSchema) -> OutputFile {
+    fn generate_table_file_from_schema(
+        &self,
+        module: &ModuleDef,
+        table: &TableDef,
+        schema: TableSchema,
+    ) -> Result<OutputFile, crate::CodegenError> {
         let module_prefix = self.module_prefix;
         let struct_name = type_ref_name(self.module_prefix, module, table.product_type_ref);
         let table_pascal = format!("{module_prefix}{}", table.name.deref().to_case(Case::Pascal));
@@ -379,14 +384,14 @@ impl Lang for UnrealCpp<'_> {
 
         writeln!(output, "}};"); // end UCLASS
 
-        OutputFile {
+        Ok(OutputFile {
             filename: format!(
                 "Source/{}/Public/ModuleBindings/Tables/{}Table.g.h",
                 self.module_name,
                 format_args!("{module_prefix}{}", table.name.deref().to_case(Case::Pascal))
             ),
             code: output.into_inner(),
-        }
+        })
     }
 
     fn generate_type_files(&self, module: &ModuleDef, typ: &TypeDef) -> Vec<OutputFile> {
@@ -418,492 +423,224 @@ impl Lang for UnrealCpp<'_> {
         vec![OutputFile { filename, code }]
     }
 
-    fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
-        let module_prefix = self.module_prefix;
-        let reducer_pascal = reducer.name.deref().to_case(Case::Pascal);
-        let pascal = format!("{module_prefix}{reducer_pascal}");
+    fn generate_reducer_file(
+        &self,
+        module: &ModuleDef,
+        reducer: &ReducerDef,
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let module_prefix = self.module_prefix;
+            let reducer_pascal = reducer.name.deref().to_case(Case::Pascal);
+            let pascal = format!("{module_prefix}{reducer_pascal}");
 
-        // Collect includes for parameter types
-        let mut includes = HashSet::<String>::new();
-        for (_param_name, param_type) in &reducer.params_for_generate.elements {
-            collect_includes_for_type(self.module_prefix, module, param_type, &mut includes, self.module_name);
-        }
-
-        // Add {module_prefix}ReducerBase.g.h for U{module_prefix}ReducerBase definition
-        includes.insert(format!("ModuleBindings/{module_prefix}ReducerBase.g.h"));
-
-        // Convert to sorted vector
-        let mut include_vec: Vec<String> = includes.into_iter().collect();
-        include_vec.sort();
-
-        // Convert to string references
-        let include_refs: Vec<&str> = include_vec.iter().map(|s| s.as_str()).collect();
-
-        let mut header = UnrealCppAutogen::new(&include_refs, &pascal, false);
-
-        let args_struct = format!("F{pascal}Args");
-
-        // Generate reducer arguments struct
-        writeln!(header, "// Reducer arguments struct for {pascal}");
-        writeln!(header, "USTRUCT(BlueprintType)");
-        writeln!(header, "struct {} {args_struct}", self.get_api_macro());
-        writeln!(header, "{{");
-        writeln!(header, "    GENERATED_BODY()");
-        writeln!(header);
-
-        // Generate properties for each parameter
-        for (param_name, param_type) in &reducer.params_for_generate.elements {
-            let param_pascal = param_name.deref().to_case(Case::Pascal);
-            let type_str = cpp_ty_fmt_with_module(self.module_prefix, module, param_type, self.module_name).to_string();
-            let init_str = cpp_ty_init_fmt_impl(self.module_prefix, module, param_type);
-            let field_decl = format!("{type_str} {param_pascal}{init_str}");
-
-            // Check if the type is blueprintable
-            if is_blueprintable(module, param_type) {
-                writeln!(header, "    UPROPERTY(BlueprintReadWrite, Category=\"SpacetimeDB\")");
-            } else {
-                // Add comment explaining why the field isn't exposed as UPROPERTY
-                writeln!(
-                    header,
-                    "    // NOTE: {type_str} field not exposed to Blueprint due to non-blueprintable elements"
-                );
+            // Collect includes for parameter types
+            let mut includes = HashSet::<String>::new();
+            for (_param_name, param_type) in &reducer.params_for_generate.elements {
+                collect_includes_for_type(self.module_prefix, module, param_type, &mut includes, self.module_name);
             }
-            writeln!(header, "    {field_decl};");
+
+            // Add {module_prefix}ReducerBase.g.h for U{module_prefix}ReducerBase definition
+            includes.insert(format!("ModuleBindings/{module_prefix}ReducerBase.g.h"));
+
+            // Convert to sorted vector
+            let mut include_vec: Vec<String> = includes.into_iter().collect();
+            include_vec.sort();
+
+            // Convert to string references
+            let include_refs: Vec<&str> = include_vec.iter().map(|s| s.as_str()).collect();
+
+            let mut header = UnrealCppAutogen::new(&include_refs, &pascal, false);
+
+            let args_struct = format!("F{pascal}Args");
+
+            // Generate reducer arguments struct
+            writeln!(header, "// Reducer arguments struct for {pascal}");
+            writeln!(header, "USTRUCT(BlueprintType)");
+            writeln!(header, "struct {} {args_struct}", self.get_api_macro());
+            writeln!(header, "{{");
+            writeln!(header, "    GENERATED_BODY()");
             writeln!(header);
-        }
 
-        // Generate default constructor
-        writeln!(header, "    {args_struct}() = default;");
-        writeln!(header);
-
-        // Generate parameterized constructor (for BSATN/internal use)
-        if !reducer.params_for_generate.elements.is_empty() {
-            write!(header, "    {args_struct}(");
-            let mut first = true;
+            // Generate properties for each parameter
             for (param_name, param_type) in &reducer.params_for_generate.elements {
-                if !first {
-                    write!(header, ", ");
-                }
-                first = false;
                 let param_pascal = param_name.deref().to_case(Case::Pascal);
                 let type_str =
                     cpp_ty_fmt_with_module(self.module_prefix, module, param_type, self.module_name).to_string();
+                let init_str = cpp_ty_init_fmt_impl(self.module_prefix, module, param_type);
+                let field_decl = format!("{type_str} {param_pascal}{init_str}");
 
-                write!(header, "const {type_str}& In{param_pascal}");
-            }
-            writeln!(header, ")");
-
-            write!(header, "        : ");
-            let mut first = true;
-            for (param_name, _) in &reducer.params_for_generate.elements {
-                if !first {
-                    write!(header, ", ");
+                // Check if the type is blueprintable
+                if is_blueprintable(module, param_type) {
+                    writeln!(header, "    UPROPERTY(BlueprintReadWrite, Category=\"SpacetimeDB\")");
+                } else {
+                    // Add comment explaining why the field isn't exposed as UPROPERTY
+                    writeln!(
+                        header,
+                        "    // NOTE: {type_str} field not exposed to Blueprint due to non-blueprintable elements"
+                    );
                 }
-                first = false;
-                let param_pascal = param_name.deref().to_case(Case::Pascal);
-                write!(header, "{param_pascal}(In{param_pascal})");
+                writeln!(header, "    {field_decl};");
+                writeln!(header);
             }
+
+            // Generate default constructor
+            writeln!(header, "    {args_struct}() = default;");
             writeln!(header);
-            writeln!(header, "    {{}}");
+
+            // Generate parameterized constructor (for BSATN/internal use)
+            if !reducer.params_for_generate.elements.is_empty() {
+                write!(header, "    {args_struct}(");
+                let mut first = true;
+                for (param_name, param_type) in &reducer.params_for_generate.elements {
+                    if !first {
+                        write!(header, ", ");
+                    }
+                    first = false;
+                    let param_pascal = param_name.deref().to_case(Case::Pascal);
+                    let type_str =
+                        cpp_ty_fmt_with_module(self.module_prefix, module, param_type, self.module_name).to_string();
+
+                    write!(header, "const {type_str}& In{param_pascal}");
+                }
+                writeln!(header, ")");
+
+                write!(header, "        : ");
+                let mut first = true;
+                for (param_name, _) in &reducer.params_for_generate.elements {
+                    if !first {
+                        write!(header, ", ");
+                    }
+                    first = false;
+                    let param_pascal = param_name.deref().to_case(Case::Pascal);
+                    write!(header, "{param_pascal}(In{param_pascal})");
+                }
+                writeln!(header);
+                writeln!(header, "    {{}}");
+                writeln!(header);
+            }
+
+            // Add operator== and operator!=
             writeln!(header);
-        }
-
-        // Add operator== and operator!=
-        writeln!(header);
-        writeln!(
-            header,
-            "    FORCEINLINE bool operator==(const {args_struct}& Other) const"
-        );
-        writeln!(header, "    {{");
-
-        // Generate comparison for each field
-        let mut comparisons = Vec::new();
-        for (param_name, _) in &reducer.params_for_generate.elements {
-            let param_pascal = param_name.deref().to_case(Case::Pascal);
-
-            // For value types, direct comparison
-            comparisons.push(format!("{param_pascal} == Other.{param_pascal}"));
-        }
-
-        if comparisons.is_empty() {
-            writeln!(header, "        return true;");
-        } else {
-            writeln!(header, "        return {};", comparisons.join(" && "));
-        }
-
-        writeln!(header, "    }}");
-        writeln!(
-            header,
-            "    FORCEINLINE bool operator!=(const {args_struct}& Other) const"
-        );
-        writeln!(header, "    {{");
-        writeln!(header, "        return !(*this == Other);");
-        writeln!(header, "    }}");
-
-        writeln!(header, "}};");
-        writeln!(header);
-
-        // Add BSATN serialization support for reducer args struct
-        writeln!(header, "namespace UE::SpacetimeDB");
-        writeln!(header, "{{");
-
-        // Generate the field list for the UE_SPACETIMEDB_STRUCT macro
-        let field_names: Vec<String> = reducer
-            .params_for_generate
-            .elements
-            .iter()
-            .map(|(name, _)| name.deref().to_case(Case::Pascal))
-            .collect();
-
-        if field_names.is_empty() {
-            writeln!(header, "    UE_SPACETIMEDB_STRUCT_EMPTY({args_struct});");
-        } else {
             writeln!(
                 header,
-                "    UE_SPACETIMEDB_STRUCT({args_struct}, {});",
-                field_names.join(", ")
+                "    FORCEINLINE bool operator==(const {args_struct}& Other) const"
             );
-        }
+            writeln!(header, "    {{");
 
-        writeln!(header, "}}");
-        writeln!(header);
+            // Generate comparison for each field
+            let mut comparisons = Vec::new();
+            for (param_name, _) in &reducer.params_for_generate.elements {
+                let param_pascal = param_name.deref().to_case(Case::Pascal);
 
-        // Generate the reducer class
-        writeln!(header, "// Reducer class for internal dispatching");
-        writeln!(header, "UCLASS(BlueprintType)");
-        writeln!(
-            header,
-            "class {} U{pascal}Reducer : public U{module_prefix}ReducerBase",
-            self.get_api_macro()
-        );
-        writeln!(header, "{{");
-        writeln!(header, "    GENERATED_BODY()");
-        writeln!(header);
-        writeln!(header, "public:");
+                // For value types, direct comparison
+                comparisons.push(format!("{param_pascal} == Other.{param_pascal}"));
+            }
 
-        // Generate properties for each parameter (for dispatching)
-        for (param_name, param_type) in &reducer.params_for_generate.elements {
-            let param_pascal = param_name.deref().to_case(Case::Pascal);
-            let type_str = cpp_ty_fmt_with_module(self.module_prefix, module, param_type, self.module_name).to_string();
-            let init_str = cpp_ty_init_fmt_impl(self.module_prefix, module, param_type);
-            let field_decl = format!("{type_str} {param_pascal}{init_str}");
-
-            // Check if the type is blueprintable
-            if is_blueprintable(module, param_type) {
-                writeln!(header, "    UPROPERTY(BlueprintReadOnly, Category=\"SpacetimeDB\")");
+            if comparisons.is_empty() {
+                writeln!(header, "        return true;");
             } else {
-                // Add comment explaining why the field isn't exposed as UPROPERTY
+                writeln!(header, "        return {};", comparisons.join(" && "));
+            }
+
+            writeln!(header, "    }}");
+            writeln!(
+                header,
+                "    FORCEINLINE bool operator!=(const {args_struct}& Other) const"
+            );
+            writeln!(header, "    {{");
+            writeln!(header, "        return !(*this == Other);");
+            writeln!(header, "    }}");
+
+            writeln!(header, "}};");
+            writeln!(header);
+
+            // Add BSATN serialization support for reducer args struct
+            writeln!(header, "namespace UE::SpacetimeDB");
+            writeln!(header, "{{");
+
+            // Generate the field list for the UE_SPACETIMEDB_STRUCT macro
+            let field_names: Vec<String> = reducer
+                .params_for_generate
+                .elements
+                .iter()
+                .map(|(name, _)| name.deref().to_case(Case::Pascal))
+                .collect();
+
+            if field_names.is_empty() {
+                writeln!(header, "    UE_SPACETIMEDB_STRUCT_EMPTY({args_struct});");
+            } else {
                 writeln!(
                     header,
-                    "    // NOTE: {type_str} field not exposed to Blueprint due to non-blueprintable elements"
+                    "    UE_SPACETIMEDB_STRUCT({args_struct}, {});",
+                    field_names.join(", ")
                 );
             }
-            writeln!(header, "    {field_decl};");
-        }
-        if !reducer.params_for_generate.elements.is_empty() {
+
+            writeln!(header, "}}");
             writeln!(header);
-        }
 
-        writeln!(header, "}};");
-        writeln!(header);
+            // Generate the reducer class
+            writeln!(header, "// Reducer class for internal dispatching");
+            writeln!(header, "UCLASS(BlueprintType)");
+            writeln!(
+                header,
+                "class {} U{pascal}Reducer : public U{module_prefix}ReducerBase",
+                self.get_api_macro()
+            );
+            writeln!(header, "{{");
+            writeln!(header, "    GENERATED_BODY()");
+            writeln!(header);
+            writeln!(header, "public:");
 
-        writeln!(header);
+            // Generate properties for each parameter (for dispatching)
+            for (param_name, param_type) in &reducer.params_for_generate.elements {
+                let param_pascal = param_name.deref().to_case(Case::Pascal);
+                let type_str =
+                    cpp_ty_fmt_with_module(self.module_prefix, module, param_type, self.module_name).to_string();
+                let init_str = cpp_ty_init_fmt_impl(self.module_prefix, module, param_type);
+                let field_decl = format!("{type_str} {param_pascal}{init_str}");
 
-        let module_name = &self.module_name;
-        OutputFile {
-            filename: format!("Source/{module_name}/Public/ModuleBindings/Reducers/{pascal}.g.h"),
-            code: header.into_inner(),
-        }
+                // Check if the type is blueprintable
+                if is_blueprintable(module, param_type) {
+                    writeln!(header, "    UPROPERTY(BlueprintReadOnly, Category=\"SpacetimeDB\")");
+                } else {
+                    // Add comment explaining why the field isn't exposed as UPROPERTY
+                    writeln!(
+                        header,
+                        "    // NOTE: {type_str} field not exposed to Blueprint due to non-blueprintable elements"
+                    );
+                }
+                writeln!(header, "    {field_decl};");
+            }
+            if !reducer.params_for_generate.elements.is_empty() {
+                writeln!(header);
+            }
+
+            writeln!(header, "}};");
+            writeln!(header);
+
+            writeln!(header);
+
+            let module_name = &self.module_name;
+            OutputFile {
+                filename: format!("Source/{module_name}/Public/ModuleBindings/Reducers/{pascal}.g.h"),
+                code: header.into_inner(),
+            }
+        })
     }
 
     fn generate_procedure_file(
         &self,
         module: &ModuleDef,
         procedure: &spacetimedb_schema::def::ProcedureDef,
-    ) -> OutputFile {
-        let procedure_snake = procedure.name.deref();
-        let procedure_pascal = procedure_snake.to_case(Case::Pascal);
-        let pascal = format!("{}{}", self.module_prefix, procedure_pascal);
+    ) -> Result<OutputFile, crate::CodegenError> {
+        Ok({
+            let procedure_snake = procedure.name.deref();
+            let procedure_pascal = procedure_snake.to_case(Case::Pascal);
+            let pascal = format!("{}{}", self.module_prefix, procedure_pascal);
 
-        // Collect includes for parameter types
-        let mut includes = HashSet::<String>::new();
-        for (_param_name, param_type) in &procedure.params_for_generate.elements {
-            collect_includes_for_type(self.module_prefix, module, param_type, &mut includes, self.module_name);
-        }
-        collect_includes_for_type(
-            self.module_prefix,
-            module,
-            &procedure.return_type_for_generate,
-            &mut includes,
-            self.module_name,
-        );
-
-        // Convert to sorted vector
-        let mut include_vec: Vec<String> = includes.into_iter().collect();
-        include_vec.sort();
-
-        // Convert to string references
-        let include_refs: Vec<&str> = include_vec.iter().map(|s| s.as_str()).collect();
-
-        let mut header = UnrealCppAutogen::new(&include_refs, &pascal, false);
-
-        let args_struct = format!("F{pascal}Args");
-
-        // Generate procedure arguments struct
-        writeln!(header, "// Procedure arguments struct for {pascal}");
-        writeln!(header, "USTRUCT(BlueprintType)");
-        writeln!(header, "struct {} {args_struct}", self.get_api_macro());
-        writeln!(header, "{{");
-        writeln!(header, "    GENERATED_BODY()");
-        writeln!(header);
-
-        // Generate properties for each parameter
-        for (param_name, param_type) in &procedure.params_for_generate.elements {
-            let param_pascal = param_name.deref().to_case(Case::Pascal);
-            let type_str = cpp_ty_fmt_with_module(self.module_prefix, module, param_type, self.module_name).to_string();
-            let init_str = cpp_ty_init_fmt_impl(self.module_prefix, module, param_type);
-            let field_decl = format!("{type_str} {param_pascal}{init_str}");
-
-            // Check if the type is blueprintable
-            if is_blueprintable(module, param_type) {
-                writeln!(header, "    UPROPERTY(BlueprintReadWrite, Category=\"SpacetimeDB\")");
-            } else {
-                // Add comment explaining why the field isn't exposed as UPROPERTY
-                writeln!(
-                    header,
-                    "    // NOTE: {type_str} field not exposed to Blueprint due to non-blueprintable elements"
-                );
-            }
-            writeln!(header, "    {field_decl};");
-            writeln!(header);
-        }
-
-        // Generate default constructor
-        writeln!(header, "    {args_struct}() = default;");
-        writeln!(header);
-
-        // Generate parameterized constructor (for BSATN/internal use)
-        if !procedure.params_for_generate.elements.is_empty() {
-            write!(header, "    {args_struct}(");
-            let mut first = true;
-            for (param_name, param_type) in &procedure.params_for_generate.elements {
-                if !first {
-                    write!(header, ", ");
-                }
-                first = false;
-                let param_pascal = param_name.deref().to_case(Case::Pascal);
-                let type_str =
-                    cpp_ty_fmt_with_module(self.module_prefix, module, param_type, self.module_name).to_string();
-
-                write!(header, "const {type_str}& In{param_pascal}");
-            }
-            writeln!(header, ")");
-
-            write!(header, "        : ");
-            let mut first = true;
-            for (param_name, _) in &procedure.params_for_generate.elements {
-                if !first {
-                    write!(header, ", ");
-                }
-                first = false;
-                let param_pascal = param_name.deref().to_case(Case::Pascal);
-                write!(header, "{param_pascal}(In{param_pascal})");
-            }
-            writeln!(header);
-            writeln!(header, "    {{}}");
-            writeln!(header);
-        }
-
-        // Add operator== and operator!=
-        writeln!(header);
-        writeln!(
-            header,
-            "    FORCEINLINE bool operator==(const {args_struct}& Other) const"
-        );
-        writeln!(header, "    {{");
-
-        // Generate comparison for each field
-        let mut comparisons = Vec::new();
-        for (param_name, _) in &procedure.params_for_generate.elements {
-            let param_pascal = param_name.deref().to_case(Case::Pascal);
-
-            // For value types, direct comparison
-            comparisons.push(format!("{param_pascal} == Other.{param_pascal}"));
-        }
-
-        if comparisons.is_empty() {
-            writeln!(header, "        return true;");
-        } else {
-            writeln!(header, "        return {};", comparisons.join(" && "));
-        }
-
-        writeln!(header, "    }}");
-        writeln!(
-            header,
-            "    FORCEINLINE bool operator!=(const {args_struct}& Other) const"
-        );
-        writeln!(header, "    {{");
-        writeln!(header, "        return !(*this == Other);");
-        writeln!(header, "    }}");
-
-        writeln!(header, "}};");
-        writeln!(header);
-
-        // Add BSATN serialization support for procedure args struct
-        writeln!(header, "namespace UE::SpacetimeDB");
-        writeln!(header, "{{");
-
-        // Generate the field list for the UE_SPACETIMEDB_STRUCT macro
-        let field_names: Vec<String> = procedure
-            .params_for_generate
-            .elements
-            .iter()
-            .map(|(name, _)| name.deref().to_case(Case::Pascal))
-            .collect();
-
-        if field_names.is_empty() {
-            writeln!(header, "    UE_SPACETIMEDB_STRUCT_EMPTY({args_struct});");
-        } else {
-            writeln!(
-                header,
-                "    UE_SPACETIMEDB_STRUCT({args_struct}, {});",
-                field_names.join(", ")
-            );
-        }
-
-        writeln!(header, "}}");
-
-        OutputFile {
-            filename: format!(
-                "Source/{}/Public/ModuleBindings/Procedures/{}.g.h",
-                self.module_name, pascal
-            ),
-            code: header.into_inner(),
-        }
-    }
-
-    fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
-        let module_prefix = self.module_prefix;
-        let mut files: Vec<OutputFile> = vec![];
-
-        let source_dir = self.uproject_dir.join("Source").join(self.module_name);
-        let required_files = [
-            (
-                format!("{}.Build.cs", self.module_name),
-                generate_build_cs_content(self.module_name),
-            ),
-            (
-                format!("{}.cpp", self.module_name),
-                generate_module_cpp_content(self.module_name),
-            ),
-            (
-                format!("{}.h", self.module_name),
-                generate_module_h_content(self.module_name),
-            ),
-        ];
-
-        for (filename, content) in required_files {
-            let file_path = source_dir.join(&filename);
-            if !file_path.exists() {
-                files.push(OutputFile {
-                    filename: format!("Source/{}/{}", self.module_name, filename),
-                    code: content,
-                });
-            }
-        }
-
-        ensure_module_in_uproject(self.uproject_dir, self.module_name).unwrap_or_else(|err| panic!("{err}"));
-
-        // First, collect and generate all optional types
-        let (optional_types, result_types) = collect_wrapper_types(self.module_prefix, module, options.visibility);
-        for optional_name in optional_types {
-            let module_name = &self.module_name;
-            let module_name_pascal = module_name.to_case(Case::Pascal);
-            let filename =
-                format!("Source/{module_name}/Public/ModuleBindings/Optionals/{module_name_pascal}{optional_name}.g.h");
-
-            let content = generate_optional_type(
-                &optional_name,
-                self.module_prefix,
-                module,
-                &self.get_api_macro(),
-                self.module_name,
-            );
-            files.push(OutputFile {
-                filename,
-                code: content,
-            });
-        }
-
-        for (ok_name, error_name) in result_types {
-            let module_name = &self.module_name;
-            let module_name_pascal = module_name.to_case(Case::Pascal);
-            let filename = format!(
-                "Source/{module_name}/Public/ModuleBindings/Results/{module_name_pascal}Result{ok_name}{error_name}.g.h"
-            );
-
-            let content = generate_result_type(
-                self.module_prefix,
-                &ok_name,
-                &error_name,
-                module,
-                &self.get_api_macro(),
-                self.module_name,
-            );
-            files.push(OutputFile {
-                filename,
-                code: content,
-            });
-        }
-
-        // Generate the main SpacetimeDBClient file with proper manual includes
-        let mut includes = HashSet::<String>::new();
-
-        // Add base includes
-        includes.insert("Connection/DbConnectionBase.h".to_string());
-        includes.insert("Connection/DbConnectionBuilder.h".to_string());
-        includes.insert("Connection/Subscription.h".to_string());
-        includes.insert("Connection/Callback.h".to_string());
-        includes.insert(format!("ModuleBindings/{module_prefix}ReducerBase.g.h"));
-        includes.insert("Kismet/BlueprintFunctionLibrary.h".to_string());
-
-        // Include reducers
-        for reducer in iter_reducers(module, options.visibility) {
-            let reducer_pascal = format!("{module_prefix}{}", reducer.name.deref().to_case(Case::Pascal));
-            includes.insert(format!("ModuleBindings/Reducers/{reducer_pascal}.g.h"));
-        }
-        // Include procedures
-        for procedure in iter_procedures(module, options.visibility) {
-            let procedure_pascal = format!("{module_prefix}{}", procedure.name.deref().to_case(Case::Pascal));
-            includes.insert(format!("ModuleBindings/Procedures/{procedure_pascal}.g.h"));
-        }
-        // Collect includes for types used in delegates and contexts
-        // FSpacetimeDBIdentity is used in F{module_prefix}OnConnectDelegate and context methods
-        collect_includes_for_type(
-            self.module_prefix,
-            module,
-            &AlgebraicTypeUse::Identity,
-            &mut includes,
-            self.module_name,
-        );
-        // FSpacetimeDBConnectionId is used in context methods
-        collect_includes_for_type(
-            self.module_prefix,
-            module,
-            &AlgebraicTypeUse::ConnectionId,
-            &mut includes,
-            self.module_name,
-        );
-
-        // Collect includes for all reducer parameter types
-        for reducer in iter_reducers(module, options.visibility) {
-            for (_param_name, param_type) in &reducer.params_for_generate.elements {
-                collect_includes_for_type(self.module_prefix, module, param_type, &mut includes, self.module_name);
-            }
-        }
-
-        // Collect includes for all procedure parameter types
-        for procedure in iter_procedures(module, options.visibility) {
+            // Collect includes for parameter types
+            let mut includes = HashSet::<String>::new();
             for (_param_name, param_type) in &procedure.params_for_generate.elements {
                 collect_includes_for_type(self.module_prefix, module, param_type, &mut includes, self.module_name);
             }
@@ -914,208 +651,495 @@ impl Lang for UnrealCpp<'_> {
                 &mut includes,
                 self.module_name,
             );
-        }
 
-        // Convert to sorted vector
-        let mut include_vec: Vec<String> = includes.into_iter().collect();
-        include_vec.sort();
+            // Convert to sorted vector
+            let mut include_vec: Vec<String> = includes.into_iter().collect();
+            include_vec.sort();
 
-        // Convert to string references
-        let include_refs: Vec<&str> = include_vec.iter().map(|s| s.as_str()).collect();
+            // Convert to string references
+            let include_refs: Vec<&str> = include_vec.iter().map(|s| s.as_str()).collect();
 
-        let self_header = format!("{module_prefix}SpacetimeDBClient");
-        let mut client_h = UnrealCppAutogen::new(&include_refs, &self_header, true);
+            let mut header = UnrealCppAutogen::new(&include_refs, &pascal, false);
 
-        // Forward declarations
-        writeln!(client_h, "// Forward declarations");
-        writeln!(client_h, "class U{module_prefix}DbConnection;");
-        writeln!(client_h, "class U{module_prefix}RemoteTables;");
-        writeln!(client_h, "class U{module_prefix}RemoteReducers;");
-        writeln!(client_h, "class U{module_prefix}RemoteProcedures;");
-        writeln!(client_h, "class U{module_prefix}SubscriptionBuilder;");
-        writeln!(client_h, "class U{module_prefix}SubscriptionHandle;");
-        writeln!(client_h);
+            let args_struct = format!("F{pascal}Args");
 
-        writeln!(client_h, "/** Forward declaration for tables */");
-        for (_, accessor_name, _) in iter_table_names_and_types(module, options.visibility) {
+            // Generate procedure arguments struct
+            writeln!(header, "// Procedure arguments struct for {pascal}");
+            writeln!(header, "USTRUCT(BlueprintType)");
+            writeln!(header, "struct {} {args_struct}", self.get_api_macro());
+            writeln!(header, "{{");
+            writeln!(header, "    GENERATED_BODY()");
+            writeln!(header);
+
+            // Generate properties for each parameter
+            for (param_name, param_type) in &procedure.params_for_generate.elements {
+                let param_pascal = param_name.deref().to_case(Case::Pascal);
+                let type_str =
+                    cpp_ty_fmt_with_module(self.module_prefix, module, param_type, self.module_name).to_string();
+                let init_str = cpp_ty_init_fmt_impl(self.module_prefix, module, param_type);
+                let field_decl = format!("{type_str} {param_pascal}{init_str}");
+
+                // Check if the type is blueprintable
+                if is_blueprintable(module, param_type) {
+                    writeln!(header, "    UPROPERTY(BlueprintReadWrite, Category=\"SpacetimeDB\")");
+                } else {
+                    // Add comment explaining why the field isn't exposed as UPROPERTY
+                    writeln!(
+                        header,
+                        "    // NOTE: {type_str} field not exposed to Blueprint due to non-blueprintable elements"
+                    );
+                }
+                writeln!(header, "    {field_decl};");
+                writeln!(header);
+            }
+
+            // Generate default constructor
+            writeln!(header, "    {args_struct}() = default;");
+            writeln!(header);
+
+            // Generate parameterized constructor (for BSATN/internal use)
+            if !procedure.params_for_generate.elements.is_empty() {
+                write!(header, "    {args_struct}(");
+                let mut first = true;
+                for (param_name, param_type) in &procedure.params_for_generate.elements {
+                    if !first {
+                        write!(header, ", ");
+                    }
+                    first = false;
+                    let param_pascal = param_name.deref().to_case(Case::Pascal);
+                    let type_str =
+                        cpp_ty_fmt_with_module(self.module_prefix, module, param_type, self.module_name).to_string();
+
+                    write!(header, "const {type_str}& In{param_pascal}");
+                }
+                writeln!(header, ")");
+
+                write!(header, "        : ");
+                let mut first = true;
+                for (param_name, _) in &procedure.params_for_generate.elements {
+                    if !first {
+                        write!(header, ", ");
+                    }
+                    first = false;
+                    let param_pascal = param_name.deref().to_case(Case::Pascal);
+                    write!(header, "{param_pascal}(In{param_pascal})");
+                }
+                writeln!(header);
+                writeln!(header, "    {{}}");
+                writeln!(header);
+            }
+
+            // Add operator== and operator!=
+            writeln!(header);
             writeln!(
-                client_h,
-                "class U{module_prefix}{}Table;",
-                accessor_name.deref().to_case(Case::Pascal)
+                header,
+                "    FORCEINLINE bool operator==(const {args_struct}& Other) const"
             );
-        }
-        writeln!(client_h, "/***/");
-        writeln!(client_h);
+            writeln!(header, "    {{");
 
-        // Delegates first (as in manual)
-        generate_delegates(&mut client_h, self.module_prefix);
+            // Generate comparison for each field
+            let mut comparisons = Vec::new();
+            for (param_name, _) in &procedure.params_for_generate.elements {
+                let param_pascal = param_name.deref().to_case(Case::Pascal);
 
-        // Context structs
-        generate_context_structs(
-            &mut client_h,
-            module,
-            options.visibility,
-            self.module_prefix,
-            &self.get_api_macro(),
-            &self.module_name.to_case(Case::Pascal),
-        );
+                // For value types, direct comparison
+                comparisons.push(format!("{param_pascal} == Other.{param_pascal}"));
+            }
 
-        // RemoteTables class
-        generate_remote_tables_class(
-            &mut client_h,
-            self.module_prefix,
-            module,
-            options.visibility,
-            &self.get_api_macro(),
-        );
+            if comparisons.is_empty() {
+                writeln!(header, "        return true;");
+            } else {
+                writeln!(header, "        return {};", comparisons.join(" && "));
+            }
 
-        // RemoteReducers class
-        generate_remote_reducers_class(
-            &mut client_h,
-            self.module_prefix,
-            module,
-            options.visibility,
-            &self.get_api_macro(),
-            self.module_name,
-        );
+            writeln!(header, "    }}");
+            writeln!(
+                header,
+                "    FORCEINLINE bool operator!=(const {args_struct}& Other) const"
+            );
+            writeln!(header, "    {{");
+            writeln!(header, "        return !(*this == Other);");
+            writeln!(header, "    }}");
 
-        // RemoteProcedures class
-        generate_remote_procedures_class(
-            &mut client_h,
-            self.module_prefix,
-            module,
-            options.visibility,
-            &self.get_api_macro(),
-            self.module_name,
-        );
+            writeln!(header, "}};");
+            writeln!(header);
 
-        // SubscriptionBuilder class
-        generate_subscription_builder_class(&mut client_h, self.module_prefix, &self.get_api_macro());
+            // Add BSATN serialization support for procedure args struct
+            writeln!(header, "namespace UE::SpacetimeDB");
+            writeln!(header, "{{");
 
-        // SubscriptionHandle class
-        generate_subscription_handle_class(&mut client_h, self.module_prefix, &self.get_api_macro());
+            // Generate the field list for the UE_SPACETIMEDB_STRUCT macro
+            let field_names: Vec<String> = procedure
+                .params_for_generate
+                .elements
+                .iter()
+                .map(|(name, _)| name.deref().to_case(Case::Pascal))
+                .collect();
 
-        // DbConnectionBuilder class
-        generate_db_connection_builder_class(&mut client_h, self.module_prefix, &self.get_api_macro());
+            if field_names.is_empty() {
+                writeln!(header, "    UE_SPACETIMEDB_STRUCT_EMPTY({args_struct});");
+            } else {
+                writeln!(
+                    header,
+                    "    UE_SPACETIMEDB_STRUCT({args_struct}, {});",
+                    field_names.join(", ")
+                );
+            }
 
-        // Main DbConnection class
-        generate_db_connection_class(
-            &mut client_h,
-            self.module_prefix,
-            self.module_name,
-            module,
-            &self.get_api_macro(),
-        );
+            writeln!(header, "}}");
 
-        // Generate the separate ReducerBase file
-        let reducer_base_header_name = format!("{module_prefix}ReducerBase");
-        let mut reducer_base_header = UnrealCppAutogen::new(&[], &reducer_base_header_name, false);
+            OutputFile {
+                filename: format!(
+                    "Source/{}/Public/ModuleBindings/Procedures/{}.g.h",
+                    self.module_name, pascal
+                ),
+                code: header.into_inner(),
+            }
+        })
+    }
 
-        // Generate the U{module_prefix}ReducerBase class
-        writeln!(reducer_base_header, "// Abstract Reducer base class");
-        writeln!(reducer_base_header, "UCLASS(Abstract, BlueprintType)");
-        writeln!(
-            reducer_base_header,
-            "class {} U{module_prefix}ReducerBase : public UObject",
-            self.get_api_macro()
-        );
-        writeln!(reducer_base_header, "{{");
-        writeln!(reducer_base_header, "    GENERATED_BODY()");
-        writeln!(reducer_base_header);
-        writeln!(reducer_base_header, "public:");
-        writeln!(
-            reducer_base_header,
-            "    virtual ~U{module_prefix}ReducerBase() = default;"
-        );
-        writeln!(reducer_base_header, "}};");
-        writeln!(reducer_base_header);
+    fn generate_global_files(
+        &self,
+        module: &ModuleDef,
+        options: &CodegenOptions,
+    ) -> Result<Vec<OutputFile>, crate::CodegenError> {
+        Ok({
+            let module_prefix = self.module_prefix;
+            let mut files: Vec<OutputFile> = vec![];
 
-        files.push(OutputFile {
-            filename: format!(
-                "Source/{}/Public/ModuleBindings/{module_prefix}ReducerBase.g.h",
-                self.module_name
-            ),
-            code: reducer_base_header.into_inner(),
-        });
+            let source_dir = self.uproject_dir.join("Source").join(self.module_name);
+            let required_files = [
+                (
+                    format!("{}.Build.cs", self.module_name),
+                    generate_build_cs_content(self.module_name),
+                ),
+                (
+                    format!("{}.cpp", self.module_name),
+                    generate_module_cpp_content(self.module_name),
+                ),
+                (
+                    format!("{}.h", self.module_name),
+                    generate_module_h_content(self.module_name),
+                ),
+            ];
 
-        files.push(OutputFile {
-            filename: format!(
-                "Source/{}/Public/ModuleBindings/{module_prefix}SpacetimeDBClient.g.h",
+            for (filename, content) in required_files {
+                let file_path = source_dir.join(&filename);
+                if !file_path.exists() {
+                    files.push(OutputFile {
+                        filename: format!("Source/{}/{}", self.module_name, filename),
+                        code: content,
+                    });
+                }
+            }
+
+            ensure_module_in_uproject(self.uproject_dir, self.module_name).unwrap_or_else(|err| panic!("{err}"));
+
+            // First, collect and generate all optional types
+            let (optional_types, result_types) = collect_wrapper_types(self.module_prefix, module, options.visibility);
+            for optional_name in optional_types {
+                let module_name = &self.module_name;
+                let module_name_pascal = module_name.to_case(Case::Pascal);
+                let filename = format!(
+                    "Source/{module_name}/Public/ModuleBindings/Optionals/{module_name_pascal}{optional_name}.g.h"
+                );
+
+                let content = generate_optional_type(
+                    &optional_name,
+                    self.module_prefix,
+                    module,
+                    &self.get_api_macro(),
+                    self.module_name,
+                );
+                files.push(OutputFile {
+                    filename,
+                    code: content,
+                });
+            }
+
+            for (ok_name, error_name) in result_types {
+                let module_name = &self.module_name;
+                let module_name_pascal = module_name.to_case(Case::Pascal);
+                let filename = format!(
+                "Source/{module_name}/Public/ModuleBindings/Results/{module_name_pascal}Result{ok_name}{error_name}.g.h"
+            );
+
+                let content = generate_result_type(
+                    self.module_prefix,
+                    &ok_name,
+                    &error_name,
+                    module,
+                    &self.get_api_macro(),
+                    self.module_name,
+                );
+                files.push(OutputFile {
+                    filename,
+                    code: content,
+                });
+            }
+
+            // Generate the main SpacetimeDBClient file with proper manual includes
+            let mut includes = HashSet::<String>::new();
+
+            // Add base includes
+            includes.insert("Connection/DbConnectionBase.h".to_string());
+            includes.insert("Connection/DbConnectionBuilder.h".to_string());
+            includes.insert("Connection/Subscription.h".to_string());
+            includes.insert("Connection/Callback.h".to_string());
+            includes.insert(format!("ModuleBindings/{module_prefix}ReducerBase.g.h"));
+            includes.insert("Kismet/BlueprintFunctionLibrary.h".to_string());
+
+            // Include reducers
+            for reducer in iter_reducers(module, options.visibility) {
+                let reducer_pascal = format!("{module_prefix}{}", reducer.name.deref().to_case(Case::Pascal));
+                includes.insert(format!("ModuleBindings/Reducers/{reducer_pascal}.g.h"));
+            }
+            // Include procedures
+            for procedure in iter_procedures(module, options.visibility) {
+                let procedure_pascal = format!("{module_prefix}{}", procedure.name.deref().to_case(Case::Pascal));
+                includes.insert(format!("ModuleBindings/Procedures/{procedure_pascal}.g.h"));
+            }
+            // Collect includes for types used in delegates and contexts
+            // FSpacetimeDBIdentity is used in F{module_prefix}OnConnectDelegate and context methods
+            collect_includes_for_type(
+                self.module_prefix,
+                module,
+                &AlgebraicTypeUse::Identity,
+                &mut includes,
                 self.module_name,
-            ),
-            code: client_h.into_inner(),
-        });
-
-        // Build table includes
-        let table_includes: Vec<String> = iter_table_names_and_types(module, options.visibility)
-            .map(|(_, accessor_name, _)| {
-                format!(
-                    "ModuleBindings/Tables/{}Table.g.h",
-                    format_args!("{module_prefix}{}", accessor_name.deref().to_case(Case::Pascal))
-                )
-            })
-            .collect();
-        let table_includes_str: Vec<&str> = table_includes.iter().map(|s| s.as_str()).collect();
-
-        let spacetime_include = format!("ModuleBindings/{module_prefix}SpacetimeDBClient.g.h");
-        let mut cpp_includes = vec![spacetime_include.as_str()];
-
-        // Add additional includes from manual reference
-        cpp_includes.extend_from_slice(&["DBCache/WithBsatn.h", "BSATN/UEBSATNHelpers.h"]);
-
-        // Add table includes
-        cpp_includes.extend(table_includes_str);
-
-        let mut client_cpp = UnrealCppAutogen::new_cpp(&cpp_includes);
-        generate_client_implementation(
-            &mut client_cpp,
-            module,
-            options.visibility,
-            self.module_prefix,
-            self.module_name,
-        );
-        files.push(OutputFile {
-            filename: format!(
-                "Source/{}/Private/ModuleBindings/{module_prefix}SpacetimeDBClient.g.cpp",
+            );
+            // FSpacetimeDBConnectionId is used in context methods
+            collect_includes_for_type(
+                self.module_prefix,
+                module,
+                &AlgebraicTypeUse::ConnectionId,
+                &mut includes,
                 self.module_name,
-            ),
-            code: client_cpp.into_inner(),
-        });
+            );
 
-        // Generate .cpp implementation files for each table
-        for table in iter_tables(module, options.visibility) {
-            let schema = TableSchema::from_module_def(module, table, (), 0.into())
-                .validated()
-                .expect("table schema should validate");
-            let table_cpp_content = generate_table_cpp(self.module_prefix, module, table, self.module_name, &schema);
-            let table_cpp_filename = format!(
-                "Source/{}/Private/ModuleBindings/Tables/{}Table.g.cpp",
+            // Collect includes for all reducer parameter types
+            for reducer in iter_reducers(module, options.visibility) {
+                for (_param_name, param_type) in &reducer.params_for_generate.elements {
+                    collect_includes_for_type(self.module_prefix, module, param_type, &mut includes, self.module_name);
+                }
+            }
+
+            // Collect includes for all procedure parameter types
+            for procedure in iter_procedures(module, options.visibility) {
+                for (_param_name, param_type) in &procedure.params_for_generate.elements {
+                    collect_includes_for_type(self.module_prefix, module, param_type, &mut includes, self.module_name);
+                }
+                collect_includes_for_type(
+                    self.module_prefix,
+                    module,
+                    &procedure.return_type_for_generate,
+                    &mut includes,
+                    self.module_name,
+                );
+            }
+
+            // Convert to sorted vector
+            let mut include_vec: Vec<String> = includes.into_iter().collect();
+            include_vec.sort();
+
+            // Convert to string references
+            let include_refs: Vec<&str> = include_vec.iter().map(|s| s.as_str()).collect();
+
+            let self_header = format!("{module_prefix}SpacetimeDBClient");
+            let mut client_h = UnrealCppAutogen::new(&include_refs, &self_header, true);
+
+            // Forward declarations
+            writeln!(client_h, "// Forward declarations");
+            writeln!(client_h, "class U{module_prefix}DbConnection;");
+            writeln!(client_h, "class U{module_prefix}RemoteTables;");
+            writeln!(client_h, "class U{module_prefix}RemoteReducers;");
+            writeln!(client_h, "class U{module_prefix}RemoteProcedures;");
+            writeln!(client_h, "class U{module_prefix}SubscriptionBuilder;");
+            writeln!(client_h, "class U{module_prefix}SubscriptionHandle;");
+            writeln!(client_h);
+
+            writeln!(client_h, "/** Forward declaration for tables */");
+            for (_, accessor_name, _) in iter_table_names_and_types(module, options.visibility) {
+                writeln!(
+                    client_h,
+                    "class U{module_prefix}{}Table;",
+                    accessor_name.deref().to_case(Case::Pascal)
+                );
+            }
+            writeln!(client_h, "/***/");
+            writeln!(client_h);
+
+            // Delegates first (as in manual)
+            generate_delegates(&mut client_h, self.module_prefix);
+
+            // Context structs
+            generate_context_structs(
+                &mut client_h,
+                module,
+                options.visibility,
+                self.module_prefix,
+                &self.get_api_macro(),
+                &self.module_name.to_case(Case::Pascal),
+            );
+
+            // RemoteTables class
+            generate_remote_tables_class(
+                &mut client_h,
+                self.module_prefix,
+                module,
+                options.visibility,
+                &self.get_api_macro(),
+            );
+
+            // RemoteReducers class
+            generate_remote_reducers_class(
+                &mut client_h,
+                self.module_prefix,
+                module,
+                options.visibility,
+                &self.get_api_macro(),
                 self.module_name,
-                format_args!("{module_prefix}{}", table.name.deref().to_case(Case::Pascal))
+            );
+
+            // RemoteProcedures class
+            generate_remote_procedures_class(
+                &mut client_h,
+                self.module_prefix,
+                module,
+                options.visibility,
+                &self.get_api_macro(),
+                self.module_name,
+            );
+
+            // SubscriptionBuilder class
+            generate_subscription_builder_class(&mut client_h, self.module_prefix, &self.get_api_macro());
+
+            // SubscriptionHandle class
+            generate_subscription_handle_class(&mut client_h, self.module_prefix, &self.get_api_macro());
+
+            // DbConnectionBuilder class
+            generate_db_connection_builder_class(&mut client_h, self.module_prefix, &self.get_api_macro());
+
+            // Main DbConnection class
+            generate_db_connection_class(
+                &mut client_h,
+                self.module_prefix,
+                self.module_name,
+                module,
+                &self.get_api_macro(),
+            );
+
+            // Generate the separate ReducerBase file
+            let reducer_base_header_name = format!("{module_prefix}ReducerBase");
+            let mut reducer_base_header = UnrealCppAutogen::new(&[], &reducer_base_header_name, false);
+
+            // Generate the U{module_prefix}ReducerBase class
+            writeln!(reducer_base_header, "// Abstract Reducer base class");
+            writeln!(reducer_base_header, "UCLASS(Abstract, BlueprintType)");
+            writeln!(
+                reducer_base_header,
+                "class {} U{module_prefix}ReducerBase : public UObject",
+                self.get_api_macro()
+            );
+            writeln!(reducer_base_header, "{{");
+            writeln!(reducer_base_header, "    GENERATED_BODY()");
+            writeln!(reducer_base_header);
+            writeln!(reducer_base_header, "public:");
+            writeln!(
+                reducer_base_header,
+                "    virtual ~U{module_prefix}ReducerBase() = default;"
+            );
+            writeln!(reducer_base_header, "}};");
+            writeln!(reducer_base_header);
+
+            files.push(OutputFile {
+                filename: format!(
+                    "Source/{}/Public/ModuleBindings/{module_prefix}ReducerBase.g.h",
+                    self.module_name
+                ),
+                code: reducer_base_header.into_inner(),
+            });
+
+            files.push(OutputFile {
+                filename: format!(
+                    "Source/{}/Public/ModuleBindings/{module_prefix}SpacetimeDBClient.g.h",
+                    self.module_name,
+                ),
+                code: client_h.into_inner(),
+            });
+
+            // Build table includes
+            let table_includes: Vec<String> = iter_table_names_and_types(module, options.visibility)
+                .map(|(_, accessor_name, _)| {
+                    format!(
+                        "ModuleBindings/Tables/{}Table.g.h",
+                        format_args!("{module_prefix}{}", accessor_name.deref().to_case(Case::Pascal))
+                    )
+                })
+                .collect();
+            let table_includes_str: Vec<&str> = table_includes.iter().map(|s| s.as_str()).collect();
+
+            let spacetime_include = format!("ModuleBindings/{module_prefix}SpacetimeDBClient.g.h");
+            let mut cpp_includes = vec![spacetime_include.as_str()];
+
+            // Add additional includes from manual reference
+            cpp_includes.extend_from_slice(&["DBCache/WithBsatn.h", "BSATN/UEBSATNHelpers.h"]);
+
+            // Add table includes
+            cpp_includes.extend(table_includes_str);
+
+            let mut client_cpp = UnrealCppAutogen::new_cpp(&cpp_includes);
+            generate_client_implementation(
+                &mut client_cpp,
+                module,
+                options.visibility,
+                self.module_prefix,
+                self.module_name,
             );
             files.push(OutputFile {
-                filename: table_cpp_filename,
-                code: table_cpp_content,
+                filename: format!(
+                    "Source/{}/Private/ModuleBindings/{module_prefix}SpacetimeDBClient.g.cpp",
+                    self.module_name,
+                ),
+                code: client_cpp.into_inner(),
             });
-        }
-        for view in module.views() {
-            let tbl = TableDef::from(view.clone());
-            let schema = TableSchema::from_view_def_for_codegen(module, view)
-                .validated()
-                .expect("Failed to generate table due to validation errors");
-            let view_cpp_content = generate_table_cpp(self.module_prefix, module, &tbl, self.module_name, &schema);
-            let view_cpp_filename = format!(
-                "Source/{}/Private/ModuleBindings/Tables/{}Table.g.cpp",
-                self.module_name,
-                format_args!("{module_prefix}{}", view.name.deref().to_case(Case::Pascal))
-            );
-            files.push(OutputFile {
-                filename: view_cpp_filename,
-                code: view_cpp_content,
-            });
-        }
 
-        files
+            // Generate .cpp implementation files for each table
+            for table in iter_tables(module, options.visibility) {
+                let schema = TableSchema::from_module_def(module, table, (), 0.into())
+                    .validated()
+                    .expect("table schema should validate");
+                let table_cpp_content =
+                    generate_table_cpp(self.module_prefix, module, table, self.module_name, &schema);
+                let table_cpp_filename = format!(
+                    "Source/{}/Private/ModuleBindings/Tables/{}Table.g.cpp",
+                    self.module_name,
+                    format_args!("{module_prefix}{}", table.name.deref().to_case(Case::Pascal))
+                );
+                files.push(OutputFile {
+                    filename: table_cpp_filename,
+                    code: table_cpp_content,
+                });
+            }
+            for view in module.views() {
+                let tbl = TableDef::from(view.clone());
+                let schema = TableSchema::from_view_def_for_codegen(module, view)
+                    .validated()
+                    .expect("Failed to generate table due to validation errors");
+                let view_cpp_content = generate_table_cpp(self.module_prefix, module, &tbl, self.module_name, &schema);
+                let view_cpp_filename = format!(
+                    "Source/{}/Private/ModuleBindings/Tables/{}Table.g.cpp",
+                    self.module_name,
+                    format_args!("{module_prefix}{}", view.name.deref().to_case(Case::Pascal))
+                );
+                files.push(OutputFile {
+                    filename: view_cpp_filename,
+                    code: view_cpp_content,
+                });
+            }
+
+            files
+        })
     }
 }
 

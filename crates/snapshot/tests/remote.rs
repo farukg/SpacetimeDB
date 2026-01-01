@@ -4,7 +4,7 @@ use env_logger::Env;
 use log::info;
 use pretty_assertions::assert_matches;
 use rand::seq::IndexedRandom as _;
-use spacetimedb::{
+use spacetimedb_core::{
     db::{
         relational_db::{tests_utils::TestDB, Persistence, SNAPSHOT_FREQUENCY},
         snapshot::{self, SnapshotWorker},

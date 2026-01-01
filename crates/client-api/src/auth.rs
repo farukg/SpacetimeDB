@@ -6,14 +6,14 @@ use axum_extra::typed_header::TypedHeader;
 use headers::{authorization, HeaderMapExt};
 use http::{request, HeaderValue, StatusCode};
 use serde::{Deserialize, Serialize};
-use spacetimedb::auth::identity::{ConnectionAuthCtx, SpacetimeIdentityClaims};
-use spacetimedb::auth::identity::{JwtError, JwtErrorKind};
-use spacetimedb::auth::token_validation::{
+use spacetimedb_core::auth::identity::{ConnectionAuthCtx, SpacetimeIdentityClaims};
+use spacetimedb_core::auth::identity::{JwtError, JwtErrorKind};
+use spacetimedb_core::auth::token_validation::{
     new_validator, DefaultValidator, TokenSigner, TokenValidationError, TokenValidator,
 };
-use spacetimedb::auth::JwtKeys;
-use spacetimedb::energy::FunctionBudget;
-use spacetimedb::identity::Identity;
+use spacetimedb_core::auth::JwtKeys;
+use spacetimedb_core::energy::FunctionBudget;
+use spacetimedb_core::identity::Identity;
 use spacetimedb_data_structures::map::HashMap;
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
@@ -287,7 +287,7 @@ mod tests {
     use axum::{body::to_bytes, response::IntoResponse};
     use http::StatusCode;
 
-    use spacetimedb::auth::{token_validation::TokenValidationError, token_validation::TokenValidator, JwtKeys};
+    use spacetimedb_core::auth::{token_validation::TokenValidationError, token_validation::TokenValidator, JwtKeys};
     use spacetimedb_data_structures::map::{HashCollectionExt as _, HashMap, HashSet};
 
     // Make sure that when we encode TokenClaims, we can decode to get the expected identity.

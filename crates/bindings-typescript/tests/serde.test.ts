@@ -34,6 +34,7 @@ describe('it correctly serializes and deserializes algebraic values', () => {
 
   test('when it serializes and deserializes with a sum type', () => {
     const value = { tag: 'bar', value: 5 };
+    const expectedDeserialized = { tag: 'Bar', value: 5, _0: 5 };
     const algebraic_type = AlgebraicType.Sum({
       variants: [
         { name: 'bar', algebraicType: AlgebraicType.U32 },
@@ -52,7 +53,7 @@ describe('it correctly serializes and deserializes algebraic values', () => {
       algebraic_type
     );
 
-    expect(deserializedValue).toEqual(value);
+    expect(deserializedValue).toEqual(expectedDeserialized);
   });
 
   test('when it serializes and deserializes an Identity type', () => {
@@ -83,11 +84,11 @@ describe('it correctly serializes and deserializes algebraic values', () => {
   });
 
   test('when it serializes and deserializes an Interval ScheduleAt', () => {
+    const payload = { __time_duration_micros__: BigInt(1234567890123456789n) };
     const value = {
       tag: 'Interval',
-      value: {
-        __time_duration_micros__: BigInt(1234567890123456789n),
-      },
+      value: payload,
+      _0: payload,
     };
 
     const algebraic_type = ScheduleAt.getAlgebraicType();
@@ -108,11 +109,13 @@ describe('it correctly serializes and deserializes algebraic values', () => {
   });
 
   test('when it serializes and deserializes a Time ScheduleAt', () => {
+    const payload = {
+      __timestamp_micros_since_unix_epoch__: BigInt(1234567890123456789n),
+    };
     const value = {
       tag: 'Time',
-      value: {
-        __timestamp_micros_since_unix_epoch__: BigInt(1234567890123456789n),
-      },
+      value: payload,
+      _0: payload,
     };
 
     const algebraic_type = ScheduleAt.getAlgebraicType();
