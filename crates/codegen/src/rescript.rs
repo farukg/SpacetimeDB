@@ -105,7 +105,7 @@ fn generate_types_file(module: &ModuleDef) -> OutputFile {
     let types: Vec<_> = iter_types(module).collect();
     if types.is_empty() {
         return OutputFile {
-            filename: "Types.res".to_string(),
+            filename: "StdbTypes.res".to_string(),
             code: output.into_inner(),
         };
     }
@@ -132,7 +132,7 @@ fn generate_types_file(module: &ModuleDef) -> OutputFile {
     }
 
     OutputFile {
-        filename: "Types.res".to_string(),
+        filename: "StdbTypes.res".to_string(),
         code: output.into_inner(),
     }
 }
@@ -143,7 +143,7 @@ fn generate_index_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFi
 
     print_auto_generated_file_comment(out);
     writeln!(out, "");
-    writeln!(out, "module Types = Types");
+    writeln!(out, "module StdbTypes = StdbTypes");
     writeln!(out, "");
 
     writeln!(out, "module Tables = {{");
@@ -184,7 +184,7 @@ fn generate_index_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFi
     }
 }
 
-/// Used for per-table / per-reducer files (outside Types.res): emits `type <name> = { ... }`.
+/// Used for per-table / per-reducer files (outside StdbTypes.res): emits `type <name> = { ... }`.
 fn write_record_type(module: &ModuleDef, out: &mut Indenter, name: &str, elements: &[(Identifier, AlgebraicTypeUse)]) {
     write_record_type_ctx(module, out, name, elements, false);
 }
@@ -199,7 +199,7 @@ fn write_record_type_ctx(
     write_record_type_kw(module, out, "type", name, elements, in_types_file);
 }
 
-/// Used inside Types.res: emits `<keyword> <name> = { ... }` where keyword is `type rec` or `and`.
+/// Used inside StdbTypes.res: emits `<keyword> <name> = { ... }` where keyword is `type rec` or `and`.
 fn write_record_type_rec(
     module: &ModuleDef,
     out: &mut Indenter,
@@ -341,22 +341,22 @@ fn write_res_type_ctx(module: &ModuleDef, out: &mut Indenter, ty: &AlgebraicType
             if in_types_file {
                 write!(out, "{reference_name}");
             } else {
-                write!(out, "Types.{reference_name}");
+                write!(out, "StdbTypes.{reference_name}");
             }
         }
     }
 }
 
 fn table_module_name(table_name: &Identifier) -> String {
-    format!("{}Table", table_name.deref().to_case(Case::Pascal))
+    format!("Stdb{}Table", table_name.deref().to_case(Case::Pascal))
 }
 
 fn reducer_module_name(reducer_name: &ReducerName) -> String {
-    format!("{}Reducer", reducer_name.deref().to_case(Case::Pascal))
+    format!("Stdb{}Reducer", reducer_name.deref().to_case(Case::Pascal))
 }
 
 fn procedure_module_name(procedure_name: &Identifier) -> String {
-    format!("{}Procedure", procedure_name.deref().to_case(Case::Pascal))
+    format!("Stdb{}Procedure", procedure_name.deref().to_case(Case::Pascal))
 }
 
 fn rescript_type_name(type_name_pascal: String) -> String {
