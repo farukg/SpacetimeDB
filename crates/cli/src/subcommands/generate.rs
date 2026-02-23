@@ -6,8 +6,8 @@ use clap::Arg;
 use clap::ArgAction::{Set, SetTrue};
 use fs_err as fs;
 use spacetimedb_codegen::{
-    generate, private_table_names, CodegenOptions, CodegenVisibility, Csharp, Lang, OutputFile, Rust, TypeScript,
-    UnrealCpp, AUTO_GENERATED_PREFIX,
+    generate, private_table_names, CodegenOptions, CodegenVisibility, Csharp, Lang, OutputFile, ReScript, Rust,
+    TypeScript, UnrealCpp, AUTO_GENERATED_PREFIX,
 };
 use spacetimedb_lib::de::serde::DeserializeWrapper;
 use spacetimedb_lib::{sats, RawModuleDef};
@@ -381,6 +381,9 @@ fn prepare_generate_run_configs<'a>(
 }
 
 fn detect_default_language(client_project_dir: &Path) -> anyhow::Result<Language> {
+    if client_project_dir.join("rescript.json").exists() {
+        return Ok(Language::ReScript);
+    }
     if client_project_dir.join("package.json").exists() {
         return Ok(Language::TypeScript);
     }
@@ -407,6 +410,7 @@ fn language_cli_name(lang: Language) -> &'static str {
     match lang {
         Language::Rust => "rust",
         Language::Csharp => "csharp",
+        Language::ReScript => "rescript",
         Language::TypeScript => "typescript",
         Language::UnrealCpp => "unrealcpp",
     }
@@ -414,7 +418,7 @@ fn language_cli_name(lang: Language) -> &'static str {
 
 pub fn default_out_dir_for_language(lang: Language) -> Option<PathBuf> {
     match lang {
-        Language::Rust | Language::TypeScript => Some(PathBuf::from("src/module_bindings")),
+        Language::Rust | Language::TypeScript | Language::ReScript => Some(PathBuf::from("src/module_bindings")),
         Language::Csharp => Some(PathBuf::from("module_bindings")),
         Language::UnrealCpp => None,
     }
@@ -516,6 +520,7 @@ pub async fn run_prepared_generate_configs(
                 &unreal_cpp_lang as &dyn Lang
             }
             Language::Rust => &Rust,
+            Language::ReScript => &ReScript,
             Language::TypeScript => &TypeScript,
         };
 
@@ -676,6 +681,8 @@ pub async fn exec_from_entries(
 pub enum Language {
     Csharp,
     TypeScript,
+    #[serde(alias = "res")]
+    ReScript,
     Rust,
     #[serde(alias = "uecpp", alias = "ue5cpp", alias = "unreal")]
     UnrealCpp,
@@ -683,12 +690,19 @@ pub enum Language {
 
 impl clap::ValueEnum for Language {
     fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Csharp, Self::TypeScript, Self::Rust, Self::UnrealCpp]
+        &[
+            Self::Csharp,
+            Self::TypeScript,
+            Self::ReScript,
+            Self::Rust,
+            Self::UnrealCpp,
+        ]
     }
     fn to_possible_value(&self) -> Option<PossibleValue> {
         Some(match self {
             Self::Csharp => clap::builder::PossibleValue::new("csharp").aliases(["c#", "cs"]),
             Self::TypeScript => clap::builder::PossibleValue::new("typescript").aliases(["ts", "TS"]),
+            Self::ReScript => clap::builder::PossibleValue::new("rescript").aliases(["res", "RES"]),
             Self::Rust => clap::builder::PossibleValue::new("rust").aliases(["rs", "RS"]),
             Self::UnrealCpp => PossibleValue::new("unrealcpp").aliases(["uecpp", "ue5cpp", "unreal"]),
         })
@@ -701,6 +715,7 @@ impl Language {
         match self {
             Language::Rust => "Rust",
             Language::Csharp => "C#",
+            Language::ReScript => "ReScript",
             Language::TypeScript => "TypeScript",
             Language::UnrealCpp => "Unreal C++",
         }
@@ -710,6 +725,9 @@ impl Language {
         match self {
             Language::Rust => rustfmt(generated_files)?,
             Language::Csharp => dotnet_format(project_dir, generated_files)?,
+            Language::ReScript => {
+                // TODO: implement formatting.
+            }
             Language::TypeScript => {
                 // TODO: implement formatting.
             }
@@ -1091,6 +1109,26 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_rescript_language_from_client_project() {
+        let cmd = cli();
+        let schema = build_generate_config_schema(&cmd).unwrap();
+        let matches = cmd.clone().get_matches_from(vec!["generate"]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let module_dir = temp.path().join("spacetimedb");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        std::fs::write(temp.path().join("rescript.json"), "{\"name\":\"client\"}").unwrap();
+        let mut cfg = HashMap::new();
+        cfg.insert(
+            "module-path".to_string(),
+            serde_json::Value::String(module_dir.display().to_string()),
+        );
+        let command_config = CommandConfig::new(&schema, cfg, &matches).unwrap();
+        let runs = prepare_generate_run_configs(vec![command_config], true, Some(temp.path())).unwrap();
+        assert_eq!(runs[0].lang, Language::ReScript);
+        assert_eq!(runs[0].out_dir, temp.path().join("src/module_bindings"));
+    }
+
+    #[test]
     fn test_detect_csharp_language_from_client_project() {
         let cmd = cli();
         let schema = build_generate_config_schema(&cmd).unwrap();
@@ -1361,6 +1399,10 @@ mod tests {
             Language::TypeScript
         );
         assert_eq!(
+            serde_json::from_value::<Language>(serde_json::Value::String("rescript".into())).unwrap(),
+            Language::ReScript
+        );
+        assert_eq!(
             serde_json::from_value::<Language>(serde_json::Value::String("rust".into())).unwrap(),
             Language::Rust
         );
@@ -1370,6 +1412,10 @@ mod tests {
         );
 
         // Aliases
+        assert_eq!(
+            serde_json::from_value::<Language>(serde_json::Value::String("res".into())).unwrap(),
+            Language::ReScript
+        );
         assert_eq!(
             serde_json::from_value::<Language>(serde_json::Value::String("uecpp".into())).unwrap(),
             Language::UnrealCpp
