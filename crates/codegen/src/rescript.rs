@@ -98,13 +98,28 @@ fn generate_types_file(module: &ModuleDef) -> OutputFile {
     print_auto_generated_file_comment(out);
     writeln!(out, "");
 
-    for ty in iter_types(module) {
+    // Collect all types first so we know whether to emit `type rec` or `and`.
+    // ReScript requires `type rec ... and ...` when types reference each other
+    // (including forward references, which are common when product types come
+    // before the enum types they reference).
+    let types: Vec<_> = iter_types(module).collect();
+    if types.is_empty() {
+        return OutputFile {
+            filename: "Types.res".to_string(),
+            code: output.into_inner(),
+        };
+    }
+
+    for (i, ty) in types.iter().enumerate() {
         let type_name = rescript_type_name(collect_case(Case::Pascal, ty.accessor_name.name_segments()));
+        let keyword = if i == 0 { "type rec" } else { "and" };
         match &module.typespace_for_generate()[ty.ty] {
-            AlgebraicTypeDef::Product(product) => write_record_type(module, out, &type_name, &product.elements),
-            AlgebraicTypeDef::Sum(sum) => write_sum_type(module, out, &type_name, &sum.variants),
+            AlgebraicTypeDef::Product(product) => {
+                write_record_type_rec(module, out, keyword, &type_name, &product.elements)
+            }
+            AlgebraicTypeDef::Sum(sum) => write_sum_type_rec(module, out, keyword, &type_name, &sum.variants),
             AlgebraicTypeDef::PlainEnum(plain_enum) => {
-                writeln!(out, "type {type_name} =");
+                writeln!(out, "{keyword} {type_name} =");
                 out.indent(1);
                 for variant in &plain_enum.variants {
                     let constructor = rescript_constructor_name(variant.deref());
@@ -169,19 +184,52 @@ fn generate_index_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFi
     }
 }
 
+/// Used for per-table / per-reducer files (outside Types.res): emits `type <name> = { ... }`.
 fn write_record_type(module: &ModuleDef, out: &mut Indenter, name: &str, elements: &[(Identifier, AlgebraicTypeUse)]) {
+    write_record_type_ctx(module, out, name, elements, false);
+}
+
+fn write_record_type_ctx(
+    module: &ModuleDef,
+    out: &mut Indenter,
+    name: &str,
+    elements: &[(Identifier, AlgebraicTypeUse)],
+    in_types_file: bool,
+) {
+    write_record_type_kw(module, out, "type", name, elements, in_types_file);
+}
+
+/// Used inside Types.res: emits `<keyword> <name> = { ... }` where keyword is `type rec` or `and`.
+fn write_record_type_rec(
+    module: &ModuleDef,
+    out: &mut Indenter,
+    keyword: &str,
+    name: &str,
+    elements: &[(Identifier, AlgebraicTypeUse)],
+) {
+    write_record_type_kw(module, out, keyword, name, elements, true);
+}
+
+fn write_record_type_kw(
+    module: &ModuleDef,
+    out: &mut Indenter,
+    keyword: &str,
+    name: &str,
+    elements: &[(Identifier, AlgebraicTypeUse)],
+    in_types_file: bool,
+) {
     if elements.is_empty() {
-        writeln!(out, "type {name} = unit");
+        writeln!(out, "{keyword} {name} = unit");
         writeln!(out, "");
         return;
     }
 
-    writeln!(out, "type {name} = {{");
+    writeln!(out, "{keyword} {name} = {{");
     out.indent(1);
     for (field, ty) in elements {
         let field_name = rescript_field_name(field.deref().to_case(Case::Camel));
         write!(out, "{field_name}: ");
-        write_res_type(module, out, ty);
+        write_res_type_ctx(module, out, ty, in_types_file);
         writeln!(out, ",");
     }
     out.dedent(1);
@@ -189,8 +237,25 @@ fn write_record_type(module: &ModuleDef, out: &mut Indenter, name: &str, element
     writeln!(out, "");
 }
 
-fn write_sum_type(module: &ModuleDef, out: &mut Indenter, name: &str, variants: &[(Identifier, AlgebraicTypeUse)]) {
-    writeln!(out, "type {name} =");
+fn write_sum_type_rec(
+    module: &ModuleDef,
+    out: &mut Indenter,
+    keyword: &str,
+    name: &str,
+    variants: &[(Identifier, AlgebraicTypeUse)],
+) {
+    write_sum_type_ctx(module, out, keyword, name, variants, true);
+}
+
+fn write_sum_type_ctx(
+    module: &ModuleDef,
+    out: &mut Indenter,
+    keyword: &str,
+    name: &str,
+    variants: &[(Identifier, AlgebraicTypeUse)],
+    in_types_file: bool,
+) {
+    writeln!(out, "{keyword} {name} =");
     out.indent(1);
     for (variant_name, variant_type) in variants {
         let constructor = rescript_constructor_name(variant_name.deref());
@@ -198,7 +263,7 @@ fn write_sum_type(module: &ModuleDef, out: &mut Indenter, name: &str, variants: 
             writeln!(out, "| {constructor}");
         } else {
             write!(out, "| {constructor}(");
-            write_res_type(module, out, variant_type);
+            write_res_type_ctx(module, out, variant_type, in_types_file);
             writeln!(out, ")");
         }
     }
@@ -207,6 +272,10 @@ fn write_sum_type(module: &ModuleDef, out: &mut Indenter, name: &str, variants: 
 }
 
 fn write_res_type(module: &ModuleDef, out: &mut Indenter, ty: &AlgebraicTypeUse) {
+    write_res_type_ctx(module, out, ty, false);
+}
+
+fn write_res_type_ctx(module: &ModuleDef, out: &mut Indenter, ty: &AlgebraicTypeUse, in_types_file: bool) {
     match ty {
         AlgebraicTypeUse::Unit => {
             write!(out, "unit");
@@ -225,14 +294,14 @@ fn write_res_type(module: &ModuleDef, out: &mut Indenter, ty: &AlgebraicTypeUse)
         }
         AlgebraicTypeUse::Option(inner) => {
             write!(out, "option<");
-            write_res_type(module, out, inner);
+            write_res_type_ctx(module, out, inner, in_types_file);
             write!(out, ">");
         }
         AlgebraicTypeUse::Result { ok_ty, err_ty } => {
             write!(out, "result<");
-            write_res_type(module, out, ok_ty);
+            write_res_type_ctx(module, out, ok_ty, in_types_file);
             write!(out, ", ");
-            write_res_type(module, out, err_ty);
+            write_res_type_ctx(module, out, err_ty, in_types_file);
             write!(out, ">");
         }
         AlgebraicTypeUse::Primitive(prim) => match prim {
@@ -264,12 +333,16 @@ fn write_res_type(module: &ModuleDef, out: &mut Indenter, ty: &AlgebraicTypeUse)
         }
         AlgebraicTypeUse::Array(inner) => {
             write!(out, "array<");
-            write_res_type(module, out, inner);
+            write_res_type_ctx(module, out, inner, in_types_file);
             write!(out, ">");
         }
         AlgebraicTypeUse::Ref(reference) => {
             let reference_name = rescript_type_name(type_ref_name(module, *reference));
-            write!(out, "Types.{reference_name}");
+            if in_types_file {
+                write!(out, "{reference_name}");
+            } else {
+                write!(out, "Types.{reference_name}");
+            }
         }
     }
 }
