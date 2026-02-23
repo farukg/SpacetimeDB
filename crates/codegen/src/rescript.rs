@@ -50,19 +50,10 @@ impl Lang for ReScript {
         vec![]
     }
 
-    fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
-
-        print_auto_generated_file_comment(out);
-        writeln!(out, "");
-
-        write_record_type(module, out, "params", &reducer.params_for_generate.elements);
-        writeln!(out, "let reducerName = \"{}\"", reducer.name);
-
+    fn generate_reducer_file(&self, _module: &ModuleDef, _reducer: &ReducerDef) -> OutputFile {
         OutputFile {
-            filename: format!("{}.res", reducer_module_name(&reducer.accessor_name)),
-            code: output.into_inner(),
+            filename: "StdbDummyReducer.res".to_string(),
+            code: String::new(),
         }
     }
 
@@ -87,7 +78,11 @@ impl Lang for ReScript {
     }
 
     fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
-        vec![generate_types_file(module), generate_index_file(module, options)]
+        vec![
+            generate_types_file(module),
+            generate_reducers_file(module, options),
+            generate_index_file(module, options),
+        ]
     }
 }
 
@@ -157,15 +152,7 @@ fn generate_index_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFi
     writeln!(out, "}}");
     writeln!(out, "");
 
-    writeln!(out, "module Reducers = {{");
-    out.indent(1);
-    for reducer in iter_reducers(module, options.visibility) {
-        let alias = reducer.accessor_name.deref().to_case(Case::Pascal);
-        let reducer_module = reducer_module_name(&reducer.accessor_name);
-        writeln!(out, "module {alias} = {reducer_module}");
-    }
-    out.dedent(1);
-    writeln!(out, "}}");
+    writeln!(out, "module Reducers = StdbReducers");
     writeln!(out, "");
 
     writeln!(out, "module Procedures = {{");
@@ -180,6 +167,111 @@ fn generate_index_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFi
 
     OutputFile {
         filename: "index.res".to_string(),
+        code: output.into_inner(),
+    }
+}
+
+fn generate_reducers_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFile {
+    let mut output = CodeIndenter::new(String::new(), INDENT);
+    let out = &mut output;
+
+    print_auto_generated_file_comment(out);
+    writeln!(out, "");
+
+    writeln!(
+        out,
+        "let encodeOption = (opt: option<'a>): Null.t<{{\"some\": 'a}}> => {{"
+    );
+    writeln!(out, "  switch opt {{");
+    writeln!(out, "  | None => Null.null");
+    writeln!(out, "  | Some(v) => Null.make({{\"some\": v}})");
+    writeln!(out, "  }}");
+    writeln!(out, "}}");
+    writeln!(out, "");
+
+    for reducer in iter_reducers(module, options.visibility) {
+        let reducer_name = reducer.name.clone();
+        let accessor_name = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
+        let external_name = format!("callReducerArgs_{}", accessor_name);
+
+        // write external
+        writeln!(out, "@module(\"../api/stdb-server.mjs\")");
+        writeln!(out, "external {external_name}: (");
+        out.indent(1);
+
+        let elements = &reducer.params_for_generate.elements;
+        if elements.is_empty() {
+            writeln!(out, "@as(\"{reducer_name}\") _,");
+            writeln!(out, "unit");
+        } else {
+            writeln!(out, "@as(\"{reducer_name}\") _,");
+            for (i, (_field, ty)) in elements.iter().enumerate() {
+                write_res_encoded_type(module, out, ty, false);
+                if i < elements.len() - 1 {
+                    writeln!(out, ",");
+                } else {
+                    writeln!(out, "");
+                }
+            }
+        }
+
+        out.dedent(1);
+        writeln!(out, ") => promise<unit> = \"callReducerArgs\"");
+        writeln!(out, "");
+
+        // write wrapper
+        write!(out, "let {} = (", accessor_name);
+        if elements.is_empty() {
+            write!(out, ")");
+        } else {
+            writeln!(out, "");
+            out.indent(1);
+            for (i, (field, ty)) in elements.iter().enumerate() {
+                let field_name = rescript_field_name(field.deref().to_case(Case::Camel));
+                write!(out, "~{}: ", field_name);
+                write_res_type_ctx(module, out, ty, false);
+                if i < elements.len() - 1 {
+                    writeln!(out, ",");
+                } else {
+                    writeln!(out, "");
+                }
+            }
+            out.dedent(1);
+            write!(out, ")");
+        }
+
+        if elements.is_empty() {
+            writeln!(out, " => {}()", external_name);
+            writeln!(out, "");
+            continue;
+        }
+        writeln!(out, " => {}(", external_name);
+        out.indent(1);
+
+        for (i, (field, ty)) in elements.iter().enumerate() {
+            let field_name = rescript_field_name(field.deref().to_case(Case::Camel));
+            let mut mapped_name = field_name.clone();
+            if let AlgebraicTypeUse::Option(_) = ty {
+                mapped_name = format!("encodeOption({})", field_name);
+            }
+            write!(out, "{}", mapped_name);
+            if i < elements.len() - 1 {
+                writeln!(out, ",");
+            } else {
+                writeln!(out, "");
+            }
+        }
+        out.dedent(1);
+        if !elements.is_empty() {
+            writeln!(out, ")");
+        } else {
+            writeln!(out, "");
+        }
+        writeln!(out, "");
+    }
+
+    OutputFile {
+        filename: "StdbReducers.res".into(),
         code: output.into_inner(),
     }
 }
@@ -269,6 +361,22 @@ fn write_sum_type_ctx(
     }
     out.dedent(1);
     writeln!(out, "");
+}
+
+fn write_res_encoded_type(module: &ModuleDef, out: &mut Indenter, ty: &AlgebraicTypeUse, in_types_file: bool) {
+    match ty {
+        AlgebraicTypeUse::Option(inner) => {
+            write!(out, "Null.t<{{\"some\": ");
+            write_res_encoded_type(module, out, inner, in_types_file);
+            write!(out, "}}>");
+        }
+        AlgebraicTypeUse::Array(inner) => {
+            write!(out, "array<");
+            write_res_encoded_type(module, out, inner, in_types_file);
+            write!(out, ">");
+        }
+        _ => write_res_type_ctx(module, out, ty, in_types_file),
+    }
 }
 
 fn write_res_type(module: &ModuleDef, out: &mut Indenter, ty: &AlgebraicTypeUse) {
