@@ -772,7 +772,6 @@ fn generate_bindings_file(module: &ModuleDef, options: &CodegenOptions) -> Outpu
     writeln!(out, "// Opaque SDK types");
     writeln!(out, "type connection");
     writeln!(out, "type eventCtx");
-    writeln!(out, "type db");
     writeln!(out, "type reducers");
     writeln!(out, "");
 
@@ -783,6 +782,28 @@ fn generate_bindings_file(module: &ModuleDef, options: &CodegenOptions) -> Outpu
         let camel = rescript_field_name(table.accessor_name.deref().to_case(Case::Camel));
         writeln!(out, "type {camel}Table");
     }
+    writeln!(out, "");
+
+    // ── DB record type (SIG/ADR-017: @as for compile-time-safe table access) ──
+    writeln!(
+        out,
+        "// DB record type — @as maps camelCase fields to snake_case runtime keys"
+    );
+    writeln!(out, "type db = {{");
+    out.indent(1);
+    for table in &tables {
+        let accessor = table.accessor_name.deref();
+        let camel = rescript_field_name(accessor.to_case(Case::Camel));
+        // @as string = raw accessor_name (snake_case) — SSOT from REMOTE_MODULE
+        if accessor == camel {
+            // single-word names: no @as needed (e.g. "account" == "account")
+            writeln!(out, "{camel}: {camel}Table,");
+        } else {
+            writeln!(out, "@as(\"{accessor}\") {camel}: {camel}Table,");
+        }
+    }
+    out.dedent(1);
+    writeln!(out, "}}");
     writeln!(out, "");
 
     // ── DB access chain ──
@@ -806,8 +827,7 @@ fn generate_bindings_file(module: &ModuleDef, options: &CodegenOptions) -> Outpu
 
         writeln!(out, "// ── {pascal} ──");
 
-        // Table accessor: db → table
-        writeln!(out, "@get external {camel}: db => {camel}Table = \"{camel}\"");
+        // Table accessor: db.{camel} via record type (ADR-017) — no @get needed
 
         // iter: table → Iterator.t<row>
         writeln!(
@@ -845,7 +865,8 @@ fn generate_bindings_file(module: &ModuleDef, options: &CodegenOptions) -> Outpu
         // PK index: if table has a primary key, emit index type + accessor + find
         if let Some(pk_col) = table.primary_key {
             let (pk_field, pk_type) = &product_def.elements[pk_col.idx()];
-            let pk_field_camel = rescript_field_name(pk_field.deref().to_case(Case::Camel));
+            let pk_field_raw = pk_field.deref(); // snake_case — runtime SSOT
+            let pk_field_camel = rescript_field_name(pk_field_raw.to_case(Case::Camel));
 
             // Emit PK index type
             writeln!(
@@ -854,10 +875,10 @@ fn generate_bindings_file(module: &ModuleDef, options: &CodegenOptions) -> Outpu
                 pascal_pk = pk_field_camel.to_case(Case::Pascal)
             );
 
-            // Emit @get accessor for the index
+            // Emit @get accessor for the index — @get string = raw field name (ADR-017)
             writeln!(
                 out,
-                "@get external {camel}{pascal_pk}: {camel}Table => {camel}{pascal_pk}Index = \"{pk_field_camel}\"",
+                "@get external {camel}{pascal_pk}: {camel}Table => {camel}{pascal_pk}Index = \"{pk_field_raw}\"",
                 pascal_pk = pk_field_camel.to_case(Case::Pascal)
             );
 
