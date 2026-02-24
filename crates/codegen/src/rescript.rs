@@ -87,6 +87,7 @@ impl Lang for ReScript {
             generate_reducers_file(module, options),
             generate_index_file(module, options),
             generate_schema_file(module, options),
+            generate_bindings_file(module, options),
         ]
     }
 }
@@ -96,6 +97,19 @@ fn generate_types_file(module: &ModuleDef) -> OutputFile {
     let out = &mut output;
 
     print_auto_generated_file_comment(out);
+    writeln!(out, "");
+
+    // ── Opaque timestamp type ──
+    // SDK delivers Timestamp class instances. We bind them as opaque types
+    // and expose methods via @send externals — zero normalization needed.
+    writeln!(out, "// Opaque SDK Timestamp — use toDate, toMillis, or toFloatMs");
+    writeln!(out, "type timestamp");
+    writeln!(out, "@send external toMillis: (timestamp) => bigint = \"toMillis\"");
+    writeln!(out, "@send external toDate: (timestamp) => Date.t = \"toDate\"");
+    writeln!(
+        out,
+        "let toFloatMs = (ts: timestamp): float => ts->toMillis->BigInt.toFloat"
+    );
     writeln!(out, "");
 
     // Collect all types first so we know whether to emit `type rec` or `and`.
@@ -119,11 +133,16 @@ fn generate_types_file(module: &ModuleDef) -> OutputFile {
             }
             AlgebraicTypeDef::Sum(sum) => write_sum_type_rec(module, out, keyword, &type_name, &sum.variants),
             AlgebraicTypeDef::PlainEnum(plain_enum) => {
+                // Emit @tag("tag") so ReScript generates {tag: "X", value: ...} objects
+                // matching the SpacetimeDB SDK's tagged enum representation.
+                // Unit variants get {value: unit} payload so the tag field is always present
+                // (bare payloadless variants would compile to plain strings).
+                writeln!(out, "@tag(\"tag\")");
                 writeln!(out, "{keyword} {type_name} =");
                 out.indent(1);
                 for variant in &plain_enum.variants {
                     let constructor = rescript_constructor_name(variant.deref());
-                    writeln!(out, "| {constructor}");
+                    writeln!(out, "| {constructor}({{value: unit}})");
                 }
                 out.dedent(1);
                 writeln!(out, "");
@@ -352,12 +371,15 @@ fn write_sum_type_ctx(
     variants: &[(Identifier, AlgebraicTypeUse)],
     in_types_file: bool,
 ) {
+    // Sum types (enums with potential payloads) also need @tag("tag") for SDK interop.
+    // Unit variants get {value: unit} payload to match SDK's {tag: "X", value: {}} objects.
+    writeln!(out, "@tag(\"tag\")");
     writeln!(out, "{keyword} {name} =");
     out.indent(1);
     for (variant_name, variant_type) in variants {
         let constructor = rescript_constructor_name(variant_name.deref());
         if matches!(variant_type, AlgebraicTypeUse::Unit) {
-            writeln!(out, "| {constructor}");
+            writeln!(out, "| {constructor}({{value: unit}})");
         } else {
             write!(out, "| {constructor}(");
             write_res_type_ctx(module, out, variant_type, in_types_file);
@@ -400,7 +422,11 @@ fn write_res_type_ctx(module: &ModuleDef, out: &mut Indenter, ty: &AlgebraicType
             write!(out, "string");
         }
         AlgebraicTypeUse::Timestamp | AlgebraicTypeUse::TimeDuration => {
-            write!(out, "float");
+            if in_types_file {
+                write!(out, "timestamp");
+            } else {
+                write!(out, "StdbTypes.timestamp");
+            }
         }
         AlgebraicTypeUse::ScheduleAt => {
             write!(out, "[ #Interval(float) | #Time(float) ]");
@@ -487,6 +513,14 @@ fn rescript_field_name(name: String) -> String {
 }
 
 fn rescript_constructor_name(name: &str) -> String {
+    // If the name is already PascalCase (no underscores, starts with uppercase),
+    // use as-is to preserve acronym casing (e.g. UG, AG, OHG, KG, GmbH).
+    // `convert_case::Case::Pascal` would mangle these: UG → Ug, AG → Ag.
+    let first_char = name.chars().next();
+    if first_char.is_some_and(|c| c.is_ascii_uppercase()) && !name.contains('_') {
+        return name.to_string();
+    }
+
     let pascal = name.to_case(Case::Pascal);
     if pascal.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         format!("V{pascal}")
@@ -712,6 +746,184 @@ fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions) -> OutputF
 
     OutputFile {
         filename: "StdbSchema.mjs".to_string(),
+        code: output.into_inner(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StdbBindings.res — Pure ReScript @get/@send externals for SDK interop.
+//
+// Generates typed bindings for:
+// - DB access chain (connection → db → table)
+// - Per-table: iter, onInsert/onUpdate/onDelete, isAlive, PK index
+// - WS reducers via @send on opaque reducers type
+//
+// Zero JS generated. All type safety enforced by the ReScript compiler.
+// ---------------------------------------------------------------------------
+
+fn generate_bindings_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFile {
+    let mut output = CodeIndenter::new(String::new(), INDENT);
+    let out = &mut output;
+
+    print_auto_generated_file_comment(out);
+    writeln!(out, "");
+
+    // ── Opaque SDK types ──
+    writeln!(out, "// Opaque SDK types");
+    writeln!(out, "type connection");
+    writeln!(out, "type eventCtx");
+    writeln!(out, "type db");
+    writeln!(out, "type reducers");
+    writeln!(out, "");
+
+    // ── Per-table opaque accessor types ──
+    writeln!(out, "// Table accessor types");
+    let tables: Vec<_> = iter_tables(module, options.visibility).collect();
+    for table in &tables {
+        let camel = rescript_field_name(table.accessor_name.deref().to_case(Case::Camel));
+        writeln!(out, "type {camel}Table");
+    }
+    writeln!(out, "");
+
+    // ── DB access chain ──
+    writeln!(out, "// DB access chain");
+    writeln!(out, "@get external db: connection => db = \"db\"");
+    writeln!(out, "@get external reducers: connection => reducers = \"reducers\"");
+    writeln!(out, "");
+
+    // ── Per-table bindings ──
+    for table in &tables {
+        let accessor = table.accessor_name.deref();
+        let camel = rescript_field_name(accessor.to_case(Case::Camel));
+        let pascal = accessor.to_case(Case::Pascal);
+
+        let type_ref = table.product_type_ref;
+        let product_def = module.typespace_for_generate()[type_ref].as_product().unwrap();
+
+        // Type name in StdbTypes: table accessor in camelCase (matches generate_types_file naming)
+        let type_name = rescript_type_name(accessor.to_case(Case::Pascal));
+        let qualified_type = format!("StdbTypes.{type_name}");
+
+        writeln!(out, "// ── {pascal} ──");
+
+        // Table accessor: db → table
+        writeln!(out, "@get external {camel}: db => {camel}Table = \"{camel}\"");
+
+        // iter: table → Iterator.t<row>
+        writeln!(
+            out,
+            "@send external iter{pascal}: {camel}Table => Iterator.t<{qualified_type}> = \"iter\""
+        );
+
+        // onInsert / onUpdate / onDelete
+        writeln!(
+            out,
+            "@send external on{pascal}Insert: ({camel}Table, (eventCtx, {qualified_type}) => unit) => unit = \"onInsert\""
+        );
+        writeln!(
+            out,
+            "@send external on{pascal}Update: ({camel}Table, (eventCtx, {qualified_type}, {qualified_type}) => unit) => unit = \"onUpdate\""
+        );
+        writeln!(
+            out,
+            "@send external on{pascal}Delete: ({camel}Table, (eventCtx, {qualified_type}) => unit) => unit = \"onDelete\""
+        );
+
+        // isAlive: check if table has a deleted_at field (soft-delete pattern)
+        let has_deleted_at = product_def
+            .elements
+            .iter()
+            .any(|(field_name, _)| field_name.deref() == "deleted_at");
+
+        if has_deleted_at {
+            writeln!(
+                out,
+                "let is{pascal}Alive = (row: {qualified_type}) => row.deletedAt->Option.isNone"
+            );
+        }
+
+        // PK index: if table has a primary key, emit index type + accessor + find
+        if let Some(pk_col) = table.primary_key {
+            let (pk_field, pk_type) = &product_def.elements[pk_col.idx()];
+            let pk_field_camel = rescript_field_name(pk_field.deref().to_case(Case::Camel));
+
+            // Emit PK index type
+            writeln!(
+                out,
+                "type {camel}{pascal_pk}Index",
+                pascal_pk = pk_field_camel.to_case(Case::Pascal)
+            );
+
+            // Emit @get accessor for the index
+            writeln!(
+                out,
+                "@get external {camel}{pascal_pk}: {camel}Table => {camel}{pascal_pk}Index = \"{pk_field_camel}\"",
+                pascal_pk = pk_field_camel.to_case(Case::Pascal)
+            );
+
+            // Emit @send find on the index
+            write!(
+                out,
+                "@send external find{pascal}: ({camel}{}Index, ",
+                pk_field_camel.to_case(Case::Pascal)
+            );
+            write_res_type_ctx(module, out, pk_type, false);
+            writeln!(out, ") => Nullable.t<{qualified_type}> = \"find\"");
+        }
+
+        writeln!(out, "");
+    }
+
+    // ── WS Reducer arg types ──
+    // ReScript disallows inline record types in external declarations,
+    // so we emit named types first, then reference them in the externals.
+    writeln!(out, "// ── WS Reducer arg types ──");
+    let reducers: Vec<_> = iter_reducers(module, options.visibility)
+        .filter(|r| is_reducer_invokable(r))
+        .collect();
+
+    for reducer in &reducers {
+        let elements = &reducer.params_for_generate.elements;
+        if elements.is_empty() {
+            continue;
+        }
+        let accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
+        let type_name = format!("{accessor}Args");
+        writeln!(out, "type {type_name} = {{");
+        out.indent(1);
+        for (field, ty) in elements.iter() {
+            let field_name = rescript_field_name(field.deref().to_case(Case::Camel));
+            write!(out, "{field_name}: ");
+            write_res_type_ctx(module, out, ty, false);
+            writeln!(out, ",");
+        }
+        out.dedent(1);
+        writeln!(out, "}}");
+    }
+    writeln!(out, "");
+
+    // ── WS Reducer externals ──
+    writeln!(out, "// ── WS Reducers ──");
+    for reducer in &reducers {
+        let accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
+        let elements = &reducer.params_for_generate.elements;
+
+        if elements.is_empty() {
+            writeln!(
+                out,
+                "@send external {accessor}: reducers => promise<unit> = \"{accessor}\""
+            );
+        } else {
+            let type_name = format!("{accessor}Args");
+            writeln!(
+                out,
+                "@send external {accessor}: (reducers, {type_name}) => promise<unit> = \"{accessor}\""
+            );
+        }
+    }
+
+    OutputFile {
+        filename: "StdbBindings.res".to_string(),
         code: output.into_inner(),
     }
 }
