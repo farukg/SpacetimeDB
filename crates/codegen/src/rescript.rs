@@ -64,15 +64,15 @@ impl Lang for ReScript {
         // onInsert / onUpdate / onDelete
         writeln!(
             out,
-            "@send external onInsert: (handle, (StdbClient.eventCtx, t) => unit) => unit = \"onInsert\""
+            "@send external onInsert: (handle, (StdbTypes.eventCtx, t) => unit) => unit = \"onInsert\""
         );
         writeln!(
             out,
-            "@send external onUpdate: (handle, (StdbClient.eventCtx, t, t) => unit) => unit = \"onUpdate\""
+            "@send external onUpdate: (handle, (StdbTypes.eventCtx, t, t) => unit) => unit = \"onUpdate\""
         );
         writeln!(
             out,
-            "@send external onDelete: (handle, (StdbClient.eventCtx, t) => unit) => unit = \"onDelete\""
+            "@send external onDelete: (handle, (StdbTypes.eventCtx, t) => unit) => unit = \"onDelete\""
         );
         writeln!(out, "");
 
@@ -123,7 +123,7 @@ impl Lang for ReScript {
     ///
     /// Contains:
     /// - Args record type (`type args = { ... }`) — omitted if reducer has no params
-    /// - `@send` binding on `StdbClient.reducers`
+    /// - `@send` binding on `StdbTypes.reducers`
     /// - Typed helper function
     fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
         // Skip non-invokable lifecycle reducers (init, update, etc.)
@@ -159,10 +159,10 @@ impl Lang for ReScript {
             // No-arg reducer: @send binding + unit helper
             writeln!(
                 out,
-                "@send external {accessor}: StdbClient.reducers => promise<unit> = \"{accessor}\""
+                "@send external {accessor}: StdbTypes.reducers => promise<unit> = \"{accessor}\""
             );
             writeln!(out, "");
-            writeln!(out, "let call = (conn: StdbClient.connection) =>");
+            writeln!(out, "let call = (conn: StdbTypes.connection) =>");
             writeln!(out, "  conn->StdbClient.reducers->{accessor}");
         } else {
             // Args record type
@@ -184,14 +184,14 @@ impl Lang for ReScript {
             // @send binding
             writeln!(
                 out,
-                "@send external {accessor}: (StdbClient.reducers, args) => promise<unit> = \"{accessor}\""
+                "@send external {accessor}: (StdbTypes.reducers, args) => promise<unit> = \"{accessor}\""
             );
             writeln!(out, "");
 
             // Typed helper — constructs the `args` record and calls the @send binding.
             // Note: @as annotations live in the `args` type definition above; the record
             // literal here uses camelCase field names only (no @as in literals).
-            write!(out, "let call = (conn: StdbClient.connection, ");
+            write!(out, "let call = (conn: StdbTypes.connection, ");
             for (i, (field, ty)) in elements.iter().enumerate() {
                 let field_name = rescript_field_name(field.deref().to_case(Case::Camel));
                 write!(out, "~{field_name}: ");
@@ -271,6 +271,11 @@ fn generate_types_file(module: &ModuleDef) -> OutputFile {
 
     // ── Opaque timestamp type ──
     // SDK delivers Timestamp class instances. We bind them as opaque types
+    writeln!(out, "// Opaque SDK types");
+    writeln!(out, "type connection");
+    writeln!(out, "type eventCtx");
+    writeln!(out, "type reducers");
+    writeln!(out, "");
     // and expose methods via @send externals — zero normalization needed.
     writeln!(out, "// Opaque SDK Timestamp — use toDate, toMillis, or toFloatMs");
     writeln!(out, "type timestamp");
@@ -344,8 +349,8 @@ fn generate_types_file(module: &ModuleDef) -> OutputFile {
 // StdbClient.res — core SDK opaque types + db record aggregating all tables.
 //
 // This is the single import point for connection, db, reducers, and eventCtx.
-// Each per-table file references `StdbClient.eventCtx` and `StdbClient.reducers`.
-// Each per-reducer file references `StdbClient.connection` and `StdbClient.reducers`.
+// Each per-table file references `StdbTypes.eventCtx` and `StdbTypes.reducers`.
+// Each per-reducer file references `StdbTypes.connection` and `StdbTypes.reducers`.
 // ---------------------------------------------------------------------------
 
 fn generate_client_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFile {
@@ -360,9 +365,9 @@ fn generate_client_file(module: &ModuleDef, options: &CodegenOptions) -> OutputF
         out,
         "// Opaque SDK types — hold JS class instances from the SpacetimeDB SDK"
     );
-    writeln!(out, "type connection");
-    writeln!(out, "type eventCtx");
-    writeln!(out, "type reducers");
+    writeln!(out, "");
+    writeln!(out, "");
+    writeln!(out, "");
     writeln!(out, "");
 
     // ── DB record type (SIG/ADR-017: @as for compile-time-safe table access) ──
@@ -389,8 +394,8 @@ fn generate_client_file(module: &ModuleDef, options: &CodegenOptions) -> OutputF
 
     // ── DB + reducers access chain ──
     writeln!(out, "// DB and reducers access from connection");
-    writeln!(out, "@get external db: connection => db = \"db\"");
-    writeln!(out, "@get external reducers: connection => reducers = \"reducers\"");
+    writeln!(out, "@get external db: StdbTypes.connection => db = \"db\"");
+    writeln!(out, "@get external reducers: StdbTypes.connection => StdbTypes.reducers = \"reducers\"");
 
     OutputFile {
         filename: "StdbClient.res".to_string(),
@@ -696,9 +701,14 @@ fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions) -> OutputF
     let mut output = CodeIndenter::new(String::new(), INDENT);
     let out = &mut output;
 
+    let cli_version = spacetimedb_lib_version();
     writeln!(
         out,
         "// THIS FILE IS AUTOMATICALLY GENERATED BY SPACETIMEDB (ReScript codegen)."
+    );
+    writeln!(
+        out,
+        "// SpacetimeDB CLI Version: {cli_version}"
     );
     writeln!(
         out,
@@ -1085,7 +1095,7 @@ fn write_schema_table_opts<'a>(
         let columns = index_def.algorithm.columns();
         let get_name = |col_pos: spacetimedb_primitives::ColId| {
             let (field_name, _) = &product_def.elements[col_pos.idx()];
-            field_name.deref().to_string()
+            field_name.deref().to_case(Case::Camel)
         };
         if let Some(accessor_name) = &index_def.accessor_name {
             writeln!(out, "{{ name: '{}', algorithm: 'btree', columns: [", accessor_name);
@@ -1111,7 +1121,7 @@ fn write_schema_table_opts<'a>(
             .flat_map(|cs| cs.iter())
             .map(|col_id| {
                 let (field_name, _) = &product_def.elements[col_id.idx()];
-                format!("'{}'", field_name.deref())
+                format!("'{}'", field_name.deref().to_case(Case::Camel))
             })
             .collect();
 
