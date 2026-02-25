@@ -720,7 +720,7 @@ fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions) -> OutputF
     writeln!(out, "");
     writeln!(
         out,
-        "import {{ schema, table, reducers, reducerSchema, procedures, procedureSchema, t }} from \"spacetimedb\";"
+        "import {{ schema, table, reducers, reducerSchema, procedures, procedureSchema, t }} from \"@spacetimedb/rescript\";"
     );
     writeln!(out, "");
 

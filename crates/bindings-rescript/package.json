@@ -1,0 +1,24 @@
+{
+    "name": "@spacetimedb/rescript",
+    "version": "2.0.0",
+    "description": "Native ReScript bindings for SpacetimeDB",
+    "author": "Clockwork Labs",
+    "license": "ISC",
+    "type": "module",
+    "main": "src/js_exports.mjs",
+    "exports": {
+        ".": "./src/js_exports.mjs"
+    },
+    "scripts": {
+        "build": "rescript build",
+        "clean": "rescript clean",
+        "watch": "rescript build -w"
+    },
+    "peerDependencies": {
+        "rescript": "^12.0.0"
+    },
+    "dependencies": {
+        "@rescript/core": "^1.6.0",
+        "spacetimedb": "file:../bindings-typescript"
+    }
+}

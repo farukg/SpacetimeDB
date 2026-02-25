@@ -1,0 +1,23 @@
+{
+    "name": "@spacetimedb/rescript",
+    "version": "2.0.0",
+    "sources": [
+        {
+            "dir": "src",
+            "subdirs": true
+        }
+    ],
+    "package-specs": [
+        {
+            "module": "esmodule",
+            "in-source": true
+        }
+    ],
+    "suffix": ".mjs",
+    "dependencies": [
+        "@rescript/core"
+    ],
+    "warnings": {
+        "error": "+A"
+    }
+}
