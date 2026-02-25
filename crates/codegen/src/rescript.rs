@@ -1004,7 +1004,10 @@ fn write_schema_type_builder_field(
     }
     write_schema_type_builder(module, out, ty).unwrap();
     if is_primary_key {
-        write!(out, ".primaryKey()");
+        // Custom domain types (Refs) don't have a .primaryKey() builder method in the JS SDK.
+        if !matches!(ty, AlgebraicTypeUse::Ref(_)) {
+            write!(out, ".primaryKey()");
+        }
     }
     if let Some(original_name) = original_name {
         write!(out, ".name(\"{original_name}\")");
