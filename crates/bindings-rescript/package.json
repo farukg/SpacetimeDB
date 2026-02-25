@@ -9,6 +9,11 @@
     "exports": {
         ".": "./src/js_exports.mjs"
     },
+    "files": [
+        "src",
+        "lib",
+        "rescript.json"
+    ],
     "scripts": {
         "build": "rescript build",
         "clean": "rescript clean",
