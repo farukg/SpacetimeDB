@@ -24,6 +24,6 @@
     },
     "dependencies": {
         "@rescript/core": "^1.6.0",
-        "spacetimedb": "file:../bindings-typescript"
+        "spacetimedb": "2.0.0"
     }
 }
