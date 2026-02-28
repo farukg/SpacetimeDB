@@ -1,4 +1,4 @@
-import { AlgebraicType } from './algebraic_type';
+import { AlgebraicType, getTag, type AlgebraicTypeVariants } from './algebraic_type';
 import { TimeDuration } from './time_duration';
 
 export type TimestampAlgebraicType = {
@@ -47,17 +47,17 @@ export class Timestamp {
   static isTimestamp(
     algebraicType: AlgebraicType
   ): algebraicType is TimestampAlgebraicType {
-    if (algebraicType.tag !== 'Product') {
+    if (getTag(algebraicType) !== 'Product') {
       return false;
     }
-    const elements = algebraicType.value.elements;
+    const elements = (algebraicType as AlgebraicTypeVariants.Product).value.elements;
     if (elements.length !== 1) {
       return false;
     }
     const microsElement = elements[0];
     return (
       microsElement.name === '__timestamp_micros_since_unix_epoch__' &&
-      microsElement.algebraicType.tag === 'I64'
+      getTag(microsElement.algebraicType) === 'I64'
     );
   }
 

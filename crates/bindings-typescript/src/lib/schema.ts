@@ -4,6 +4,7 @@ import {
   SumType,
   type AlgebraicTypeType,
   type AlgebraicTypeVariants,
+  getTag,
 } from './algebraic_type';
 import type {
   CaseConversionPolicy,
@@ -225,8 +226,8 @@ export class ModuleContext {
     typeBuilder: RefBuilder<any, AT>
   ): AT {
     let ty: AlgebraicType = typeBuilder.algebraicType;
-    while (ty.tag === 'Ref') {
-      ty = this.typespace.types[ty.value];
+    while (getTag(ty) === 'Ref') {
+      ty = this.typespace.types[(ty as AlgebraicTypeVariants.Ref).value];
     }
     return ty as AT;
   }

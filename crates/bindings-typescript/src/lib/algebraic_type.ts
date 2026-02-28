@@ -8,6 +8,15 @@ import { Identity } from './identity';
 import * as AlgebraicTypeVariants from './algebraic_type_variants';
 import { hasOwn } from './util';
 
+/**
+ * Extract the tag from an AlgebraicType value.
+ * Handles both object form ({tag: "U64"}) and bare string form ("U64")
+ * produced by ReScript v12 @tag("tag") payloadless variants.
+ */
+export function getTag(ty: AlgebraicTypeType | string): string {
+  return typeof ty === 'string' ? ty : ty.tag;
+}
+
 type TypespaceType = {
   types: AlgebraicTypeType[];
 };
@@ -126,21 +135,21 @@ export const AlgebraicType = {
     ty: AlgebraicTypeType,
     typespace?: TypespaceType
   ): Serializer<any> {
-    if (ty.tag === 'Ref') {
+    if (getTag(ty) === 'Ref') {
       if (!typespace)
         throw new Error('cannot serialize refs without a typespace');
-      while (ty.tag === 'Ref') ty = typespace.types[ty.value];
+      while (getTag(ty) === 'Ref') ty = typespace.types[(ty as AlgebraicTypeVariants.Ref).value];
     }
-    switch (ty.tag) {
+    switch (getTag(ty)) {
       case 'Product':
-        return ProductType.makeSerializer(ty.value, typespace);
+        return ProductType.makeSerializer((ty as AlgebraicTypeVariants.Product).value, typespace);
       case 'Sum':
-        return SumType.makeSerializer(ty.value, typespace);
+        return SumType.makeSerializer((ty as AlgebraicTypeVariants.Sum).value, typespace);
       case 'Array':
-        if (ty.value.tag === 'U8') {
+        if (getTag((ty as AlgebraicTypeVariants.Array).value) === 'U8') {
           return serializeUint8Array;
         } else {
-          const serialize = AlgebraicType.makeSerializer(ty.value, typespace);
+          const serialize = AlgebraicType.makeSerializer((ty as AlgebraicTypeVariants.Array).value, typespace);
           return (writer, value) => {
             writer.writeU32(value.length);
             for (const elem of value) {
@@ -149,7 +158,7 @@ export const AlgebraicType = {
           };
         }
       default:
-        return primitiveSerializers[ty.tag];
+        return primitiveSerializers[getTag(ty) as Primitives];
     }
   },
   /** @deprecated Use `makeSerializer` instead. */
@@ -165,22 +174,22 @@ export const AlgebraicType = {
     ty: AlgebraicTypeType,
     typespace?: TypespaceType
   ): Deserializer<any> {
-    if (ty.tag === 'Ref') {
+    if (getTag(ty) === 'Ref') {
       if (!typespace)
         throw new Error('cannot deserialize refs without a typespace');
-      while (ty.tag === 'Ref') ty = typespace.types[ty.value];
+      while (getTag(ty) === 'Ref') ty = typespace.types[(ty as AlgebraicTypeVariants.Ref).value];
     }
-    switch (ty.tag) {
+    switch (getTag(ty)) {
       case 'Product':
-        return ProductType.makeDeserializer(ty.value, typespace);
+        return ProductType.makeDeserializer((ty as AlgebraicTypeVariants.Product).value, typespace);
       case 'Sum':
-        return SumType.makeDeserializer(ty.value, typespace);
+        return SumType.makeDeserializer((ty as AlgebraicTypeVariants.Sum).value, typespace);
       case 'Array':
-        if (ty.value.tag === 'U8') {
+        if (getTag((ty as AlgebraicTypeVariants.Array).value) === 'U8') {
           return deserializeUint8Array;
         } else {
           const deserialize = AlgebraicType.makeDeserializer(
-            ty.value,
+            (ty as AlgebraicTypeVariants.Array).value,
             typespace
           );
           return reader => {
@@ -193,7 +202,7 @@ export const AlgebraicType = {
           };
         }
       default:
-        return primitiveDeserializers[ty.tag];
+        return primitiveDeserializers[getTag(ty) as Primitives];
     }
   },
   /** @deprecated Use `makeDeserializer` instead. */
@@ -215,7 +224,7 @@ export const AlgebraicType = {
     ty: AlgebraicTypeType,
     value: any
   ): ComparablePrimitive {
-    switch (ty.tag) {
+    switch (getTag(ty)) {
       case 'U8':
       case 'U16':
       case 'U32':
@@ -234,7 +243,7 @@ export const AlgebraicType = {
       case 'Bool':
         return value;
       case 'Product':
-        return ProductType.intoMapKey(ty.value, value);
+        return ProductType.intoMapKey((ty as AlgebraicTypeVariants.Product).value, value);
       default: {
         // The fallback is to serialize and base64 encode the bytes.
         const writer = new BinaryWriter(10);
@@ -328,12 +337,12 @@ type FixedSizeProductType = {
 
 const isFixedSizeProduct = (ty: ProductType): ty is FixedSizeProductType =>
   ty.elements.every(({ algebraicType }) =>
-    fixedSizePrimitives.has(algebraicType.tag)
+    fixedSizePrimitives.has(getTag(algebraicType))
   );
 
 const productSize = (ty: FixedSizeProductType): number =>
   ty.elements.reduce(
-    (acc, { algebraicType }) => acc + primitiveSizes[algebraicType.tag],
+    (acc, { algebraicType }) => acc + primitiveSizes[getTag(algebraicType) as FixedSizePrimitives],
     0
   );
 
@@ -380,7 +389,7 @@ const unitDeserializer: Deserializer<{}> = () => ({});
 
 const getElementInitializer = (element: ProductTypeElement) => {
   let init: string;
-  switch (element.algebraicType.tag) {
+  switch (getTag(element.algebraicType)) {
     case 'String':
       init = "''";
       break;
@@ -675,8 +684,8 @@ export const SumType = {
       // ReScript compiles bare variants to strings ("AG", "GmbH").
       const isPlainEnum = ty.variants.every(
         v =>
-          v.algebraicType.tag === 'Product' &&
-          v.algebraicType.value.elements.length === 0
+          getTag(v.algebraicType) === 'Product' &&
+          (v.algebraicType as AlgebraicTypeVariants.Product).value.elements.length === 0
       );
       if (isPlainEnum) {
         const indexMap: Record<string, number> = {};

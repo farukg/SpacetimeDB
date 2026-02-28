@@ -1,4 +1,4 @@
-import { AlgebraicType } from './algebraic_type';
+import { AlgebraicType, getTag, type AlgebraicTypeVariants } from './algebraic_type';
 import { TimeDuration, type TimeDurationAlgebraicType } from './time_duration';
 import { Timestamp, type TimestampAlgebraicType } from './timestamp';
 
@@ -46,10 +46,10 @@ export const ScheduleAt: {
   isScheduleAt(
     algebraicType: AlgebraicType
   ): algebraicType is ScheduleAtAlgebraicType {
-    if (algebraicType.tag !== 'Sum') {
+    if (getTag(algebraicType) !== 'Sum') {
       return false;
     }
-    const variants = algebraicType.value.variants;
+    const variants = (algebraicType as AlgebraicTypeVariants.Sum).value.variants;
     if (variants.length !== 2) {
       return false;
     }
