@@ -147,13 +147,31 @@ module AlgType = {
     algebraicType,
   }
 
-  // Lazy — for breaking circular references in topological sort (SCC cycles).
-  // Returns a JS getter that the SDK's makeSerializer/makeDeserializer follows
-  // through Ref resolution in the typespace.
-  //
-  // Implementation: We use Ref with a typespace index. The codegen assigns
-  // each type an index and uses Ref(index) for forward references.
-  // No lazy evaluation needed — the typespace array IS the indirection.
+  // Special SDK types — exact algebraicType shapes for BSATN serialization.
+  // These match the SDK's Identity.getAlgebraicType(), Timestamp.getAlgebraicType(), etc.
+  let identity = product([element(~name="__identity__", ~algebraicType=u256)])
+  let connectionId = product([element(~name="__connection_id__", ~algebraicType=u128)])
+  let timestamp = product([element(~name="__timestamp_micros_since_unix_epoch__", ~algebraicType=i64)])
+  let timeDuration = product([element(~name="__time_duration_micros__", ~algebraicType=i64)])
+  let uuid = product([element(~name="__uuid__", ~algebraicType=u128)])
+  let scheduleAt = sum([
+    variant(~name="Interval", ~algebraicType=timeDuration),
+    variant(~name="Time", ~algebraicType=timestamp),
+  ])
+
+  // Result(ok, err) — Sum with "ok" and "err" variants
+  let result = (ok, err): algebraicType =>
+    Sum({
+      value: {
+        variants: [
+          {name: Some("ok"), algebraicType: ok},
+          {name: Some("err"), algebraicType: err},
+        ],
+      },
+    })
+
+  // ByteArray — shorthand for Array(U8)
+  let byteArray = array_(u8)
 }
 
 // ─── REMOTE_MODULE data types ───────────────────────────────────────

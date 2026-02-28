@@ -251,3 +251,121 @@ pub(super) struct StdbServerReducersRes<'a> {
     pub reducer_value_fields: Vec<ServerReducerValueFieldRes<'a>>,
     pub has_reducers: bool,
 }
+
+// ===========================================================================
+// Schema Layer 0: Atomic pieces for StdbSchema.res
+// ===========================================================================
+
+/// A single product element in a schema type builder.
+/// Renders: `AlgType.element(~name="fieldName", ~algebraicType=algTypeExpr),`
+#[derive(Boilerplate)]
+pub(super) struct SchemaProductElementRes<'a> {
+    pub field_name: &'a str,
+    pub alg_type_expr: &'a str,
+}
+
+/// A single sum variant in a schema type builder.
+/// Renders: `AlgType.variant(~name="VariantName", ~algebraicType=algTypeExpr),`
+#[derive(Boilerplate)]
+pub(super) struct SchemaVariantElementRes<'a> {
+    pub variant_name: &'a str,
+    pub alg_type_expr: &'a str,
+}
+
+/// A single column entry in a table's columns Dict.
+/// Renders: `("colName", {columnMetadata: {...}, typeBuilder: {algebraicType: expr}}),`
+#[derive(Boilerplate)]
+pub(super) struct SchemaColumnEntryRes<'a> {
+    pub col_name: &'a str,
+    pub is_primary_key: bool,
+    pub alg_type_expr: &'a str,
+}
+
+/// A single index entry in a table's indexes array.
+/// Renders: `{name: "idxName", algorithm: "btree", columns: ["col1", "col2"]},`
+#[derive(Boilerplate)]
+pub(super) struct SchemaIndexEntryRes<'a> {
+    pub index_name: &'a str,
+    /// Pre-rendered columns array content, e.g. `"col1", "col2"`.
+    pub columns_str: &'a str,
+}
+
+/// A single constraint entry in a table's constraints array.
+/// Renders: `{constraintName: "name", constraint: "unique", columns: ["col1"]},`
+#[derive(Boilerplate)]
+pub(super) struct SchemaConstraintEntryRes<'a> {
+    pub constraint_name: &'a str,
+    /// Pre-rendered columns array content, e.g. `"col1", "col2"`.
+    pub columns_str: &'a str,
+}
+
+// ===========================================================================
+// Schema Layer 1: Structural sections for StdbSchema.res
+// ===========================================================================
+
+/// A named type binding — product type.
+/// Renders: `let typeName_ = AlgType.product([...elements])`
+#[derive(Boilerplate)]
+pub(super) struct SchemaProductBindingRes<'a> {
+    pub binding_name: &'a str,
+    pub elements: Vec<SchemaProductElementRes<'a>>,
+}
+
+/// A named type binding — sum type (tagged union).
+/// Renders: `let typeName_ = AlgType.sum([...variants])`
+#[derive(Boilerplate)]
+pub(super) struct SchemaSumBindingRes<'a> {
+    pub binding_name: &'a str,
+    pub variants: Vec<SchemaVariantElementRes<'a>>,
+}
+
+/// A single table definition entry in the remoteModule.
+/// Renders the full `("accessorName", {...tableDef}),` tuple.
+#[derive(Boilerplate)]
+pub(super) struct SchemaTableEntryRes<'a> {
+    pub accessor_name: &'a str,
+    pub source_name: &'a str,
+    pub row_elements: Vec<SchemaProductElementRes<'a>>,
+    pub columns: Vec<SchemaColumnEntryRes<'a>>,
+    pub indexes: Vec<SchemaIndexEntryRes<'a>>,
+    pub constraints: Vec<SchemaConstraintEntryRes<'a>>,
+    pub is_event: bool,
+}
+
+/// A single reducer definition entry.
+/// Renders: `{name: "reducer_name", accessorName: "reducerName", paramsType: {elements: [...]}},`
+#[derive(Boilerplate)]
+pub(super) struct SchemaReducerEntryRes<'a> {
+    pub reducer_name: &'a str,
+    pub accessor_name: &'a str,
+    pub param_elements: Vec<SchemaProductElementRes<'a>>,
+}
+
+/// A single procedure definition entry.
+/// Renders: `{name: "proc_name", accessorName: "procName"},`
+#[derive(Boilerplate)]
+pub(super) struct SchemaProcedureEntryRes<'a> {
+    pub procedure_name: &'a str,
+    pub accessor_name: &'a str,
+}
+
+// ===========================================================================
+// Schema Layer 2: File Composition
+// ===========================================================================
+
+/// `StdbSchema.res` — pure ReScript runtime schema (replaces StdbSchema.mjs).
+///
+/// Constructs `remoteModule` directly using `StdbSdk` types and `AlgType.*` constructors.
+/// No SDK builder functions — just record literals.
+#[derive(Boilerplate)]
+pub(super) struct StdbSchemaRes<'a> {
+    pub header: AutoGenHeaderRes,
+    pub cli_version: &'a str,
+    /// Pre-rendered type bindings (let typeName_ = AlgType.product/sum(...))
+    pub type_bindings: &'a str,
+    pub table_entries: Vec<SchemaTableEntryRes<'a>>,
+    pub reducer_entries: Vec<SchemaReducerEntryRes<'a>>,
+    pub procedure_entries: Vec<SchemaProcedureEntryRes<'a>>,
+    /// Comma-separated list of all table accessor names for allTableNames.
+    pub all_table_names: Vec<&'a str>,
+}

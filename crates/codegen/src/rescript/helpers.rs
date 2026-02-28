@@ -170,6 +170,79 @@ pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRef
 }
 
 // ---------------------------------------------------------------------------
+// Schema AlgebraicType rendering (pre-render boundary — stays in Rust)
+// ---------------------------------------------------------------------------
+
+/// Render a ReScript `AlgType.*` expression for `AlgebraicTypeUse`.
+///
+/// This produces the BSATN-level algebraicType representation consumed by the
+/// SDK's `ProductType.makeDeserializer`. Unlike `render_res_type` (which renders
+/// ReScript *type expressions*), this renders ReScript *value expressions* that
+/// construct `StdbSdk.algebraicType` values at runtime.
+///
+/// Named types (`Ref`) are rendered as camelCase let-binding names (e.g., `accountType`)
+/// because the generated `StdbSchema.res` defines a `let` binding per named type.
+pub fn render_schema_alg_type(module: &ModuleDef, ty: &AlgebraicTypeUse) -> String {
+    match ty {
+        AlgebraicTypeUse::Unit => "AlgType.unit_".to_string(),
+        AlgebraicTypeUse::Never => "AlgType.unit_".to_string(),
+        AlgebraicTypeUse::Identity => "AlgType.identity".to_string(),
+        AlgebraicTypeUse::ConnectionId => "AlgType.connectionId".to_string(),
+        AlgebraicTypeUse::Timestamp => "AlgType.timestamp".to_string(),
+        AlgebraicTypeUse::TimeDuration => "AlgType.timeDuration".to_string(),
+        AlgebraicTypeUse::ScheduleAt => "AlgType.scheduleAt".to_string(),
+        AlgebraicTypeUse::Uuid => "AlgType.uuid".to_string(),
+        AlgebraicTypeUse::String => "AlgType.string_".to_string(),
+        AlgebraicTypeUse::Option(inner) => {
+            let inner_str = render_schema_alg_type(module, inner);
+            format!("AlgType.option({inner_str})")
+        }
+        AlgebraicTypeUse::Result { ok_ty, err_ty } => {
+            let ok_str = render_schema_alg_type(module, ok_ty);
+            let err_str = render_schema_alg_type(module, err_ty);
+            format!("AlgType.result({ok_str}, {err_str})")
+        }
+        AlgebraicTypeUse::Primitive(prim) => match prim {
+            PrimitiveType::Bool => "AlgType.bool_".to_string(),
+            PrimitiveType::I8 => "AlgType.i8".to_string(),
+            PrimitiveType::U8 => "AlgType.u8".to_string(),
+            PrimitiveType::I16 => "AlgType.i16".to_string(),
+            PrimitiveType::U16 => "AlgType.u16".to_string(),
+            PrimitiveType::I32 => "AlgType.i32".to_string(),
+            PrimitiveType::U32 => "AlgType.u32".to_string(),
+            PrimitiveType::I64 => "AlgType.i64".to_string(),
+            PrimitiveType::U64 => "AlgType.u64".to_string(),
+            PrimitiveType::I128 => "AlgType.i128".to_string(),
+            PrimitiveType::U128 => "AlgType.u128".to_string(),
+            PrimitiveType::I256 => "AlgType.i256".to_string(),
+            PrimitiveType::U256 => "AlgType.u256".to_string(),
+            PrimitiveType::F32 => "AlgType.f32".to_string(),
+            PrimitiveType::F64 => "AlgType.f64".to_string(),
+        },
+        AlgebraicTypeUse::Array(inner) => {
+            if matches!(&**inner, AlgebraicTypeUse::Primitive(PrimitiveType::U8)) {
+                return "AlgType.byteArray".to_string();
+            }
+            let inner_str = render_schema_alg_type(module, inner);
+            format!("AlgType.array_({inner_str})")
+        }
+        AlgebraicTypeUse::Ref(r) => {
+            // Reference to a named type — rendered as the let-binding name in StdbSchema.res
+            let pascal_name = type_ref_name(module, *r);
+            schema_type_binding_name(&pascal_name)
+        }
+    }
+}
+
+/// Convert a PascalCase type name to a camelCase let-binding name for schema use.
+/// E.g., `AccountType` → `accountType_`, `Receipt` → `receipt_`.
+/// We suffix with `_` to avoid clashing with ReScript keywords and other bindings.
+pub fn schema_type_binding_name(pascal_name: &str) -> String {
+    let camel = pascal_name.to_case(Case::Camel);
+    format!("{camel}_")
+}
+
+// ---------------------------------------------------------------------------
 // Record / Sum / Enum type rendering (boilerplate-based, return String)
 // ---------------------------------------------------------------------------
 

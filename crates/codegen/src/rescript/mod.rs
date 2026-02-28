@@ -11,7 +11,7 @@
 //! - `index_file` — `index.res` generator (module aliases)
 //! - `server_reducers` — `StdbServerReducers.res` generator
 //! - `react` — `StdbReact.res` + `SpacetimeDBProvider.res` generators
-//! - `schema` — `StdbSchema.mjs` generator (JS runtime schema)
+//! - `schema` — `StdbSchema.res` generator (ReScript runtime schema)
 
 mod client;
 pub(crate) mod helpers;
@@ -38,8 +38,6 @@ use spacetimedb_schema::def::{ModuleDef, ProcedureDef, ReducerDef, TableDef};
 use spacetimedb_schema::schema::TableSchema;
 use std::fmt::Write;
 use std::ops::Deref;
-
-const INDENT: &str = "  ";
 
 pub struct ReScript;
 
@@ -200,7 +198,7 @@ impl Lang for ReScript {
         }
     }
 
-    /// Returns global files: StdbTypes.res, StdbSchema.mjs, StdbClient.res, index.res,
+    /// Returns global files: StdbTypes.res, StdbSchema.res, StdbClient.res, index.res,
     /// StdbServerReducers.res, StdbReact.res, SpacetimeDBProvider.res.
     fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
         let mut files = vec![
