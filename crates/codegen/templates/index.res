@@ -1,8 +1,5 @@
 {{self.header}}
 
-module StdbTypes = StdbTypes
-module StdbClient = StdbClient
-
 module Tables = {
 %% for a in &self.table_aliases {
   {{a}}

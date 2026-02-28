@@ -1,1 +1,1 @@
-  {{self.name_camel}}: {{self.name_camel}},
+    {{self.name_camel}}: {{self.name_camel}},
