@@ -184,13 +184,13 @@ type rawTableDefV10
 type indexDef = {
   name: string,
   algorithm: string,
-  columns: array<int>,
+  columns: array<string>,
 }
 
 type constraintDef = {
   constraintName: string,
   constraint: string,
-  columns: array<int>,
+  columns: array<string>,
 }
 
 type tableDef = {
@@ -200,7 +200,7 @@ type tableDef = {
   columns: Dict.t<columnDef>,
   indexes: array<indexDef>,
   constraints: array<constraintDef>,
-  tableDef: rawTableDefV10,
+  tableDef?: rawTableDefV10,
   isEvent?: bool,
 }
 
