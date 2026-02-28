@@ -1,81 +1,30 @@
-// Singleton server connection manager for SpacetimeDB.
-// Manages config, lazy connection with timeout, and subscription setup.
+// StdbServerConnection — module functor for server-side SpacetimeDB connections.
+//
+// Usage:
+//   module Config = {
+//     let remoteModule = StdbSchema.remoteModule
+//     let allTableNames = StdbSchema.allTableNames
+//     let databaseName = Env.spacetimedbDatabase
+//     let uri = Env.spacetimedbUri
+//     let connectTimeoutMs = 10000
+//   }
+//   module ServerConn = StdbServerConnection.Make(Config)
+//   let conn = await ServerConn.getConnection()
 
-// --- External bindings for spacetimedb/sdk ---
+open StdbSdk
 
-type remoteModule
-type dbConnectionBuilder
-type dbConnectionImpl
-type dbConfig
-type connection
-type subscriptionBuilder
-
-@new @module("spacetimedb/sdk")
-external makeDbConnectionBuilder: (remoteModule, dbConfig => dbConnectionImpl) => dbConnectionBuilder =
-  "DbConnectionBuilder"
-
-@new @module("spacetimedb/sdk")
-external makeDbConnectionImpl: dbConfig => dbConnectionImpl = "DbConnectionImpl"
-
-@send
-external withUri: (dbConnectionBuilder, string) => dbConnectionBuilder = "withUri"
-
-@send
-external withDatabaseName: (dbConnectionBuilder, string) => dbConnectionBuilder = "withDatabaseName"
-
-@send
-external onConnect: (dbConnectionBuilder, connection => unit) => dbConnectionBuilder = "onConnect"
-
-@send
-external onConnectError: (dbConnectionBuilder, ('ctx, JsExn.t) => unit) => dbConnectionBuilder =
-  "onConnectError"
-
-@send
-external buildConnection: dbConnectionBuilder => connection = "build"
-
-@get external isActive: connection => bool = "isActive"
-@send external disconnect: connection => unit = "disconnect"
-@send external subscriptionBuilder: connection => subscriptionBuilder = "subscriptionBuilder"
-
-@send
-external onApplied: (subscriptionBuilder, unit => unit) => subscriptionBuilder = "onApplied"
-
-@send
-external onSubError: (subscriptionBuilder, ('ctx, JsExn.t) => unit) => subscriptionBuilder = "onError"
-
-@send
-external subscribe: (subscriptionBuilder, array<string>) => unit = "subscribe"
-
-@val @scope("Promise")
-external race: array<promise<'a>> => promise<'a> = "race"
-
-@val external setTimeout: (unit => unit, int) => float = "setTimeout"
-
-// --- Config type ---
-
-type config = {
-  remoteModule: remoteModule,
-  databaseName: string,
-  uri: string,
-  allTables?: array<string>,
-  connectTimeoutMs?: int,
+module type Config = {
+  let remoteModule: remoteModule
+  let allTableNames: array<string>
+  let databaseName: string
+  let uri: string
+  let connectTimeoutMs: int
 }
 
-// --- Module state ---
-
-let serverConnectionConfig: ref<option<config>> = ref(None)
-let serverConnectionPromise: ref<option<promise<connection>>> = ref(None)
-let serverConnection: ref<option<connection>> = ref(None)
-
-// --- Internal helpers ---
-
-let defaultTimeoutMs = 10000
-
-let disconnectIfActive = () =>
-  switch serverConnection.contents {
-  | Some(conn) if conn->isActive => conn->disconnect
-  | Some(_) | None => ()
-  }
+module type S = {
+  let getConnection: unit => promise<connection>
+  let resetForTests: unit => unit
+}
 
 // Coerce any error value to exn for Promise rejection.
 // SDK callbacks deliver Exn.t (JS Error instances) which are a subset of exn.
@@ -83,9 +32,9 @@ let toExn: 'a => exn = Obj.magic
 
 let withTimeout = (connectionPromise, timeoutMs) =>
   switch timeoutMs {
-  | None | Some(0) => connectionPromise
-  | Some(ms) if ms < 0 => connectionPromise
-  | Some(ms) =>
+  | 0 => connectionPromise
+  | ms if ms < 0 => connectionPromise
+  | ms =>
     let timeoutPromise = Promise.make((_resolve, reject) => {
       setTimeout(() => {
         reject(
@@ -95,105 +44,96 @@ let withTimeout = (connectionPromise, timeoutMs) =>
         )
       }, ms)->ignore
     })
-    race([connectionPromise, timeoutPromise])
+    promiseRace([connectionPromise, timeoutPromise])
   }
 
-let connectServerConnection = config => {
-  let {remoteModule, databaseName, uri, ?allTables, ?connectTimeoutMs} = config
-  let timeoutMs = connectTimeoutMs->Option.getOr(defaultTimeoutMs)
+module Make = (C: Config): S => {
+  let connectionRef: ref<option<connection>> = ref(None)
+  let promiseRef: ref<option<promise<connection>>> = ref(None)
 
-  let builder =
-    makeDbConnectionBuilder(remoteModule, dbConfig => makeDbConnectionImpl(dbConfig))
-    ->withUri(uri)
-    ->withDatabaseName(databaseName)
-
-  let connectPromise = Promise.make((resolve, reject) => {
-    let settled = ref(false)
-
-    let resolveOnce = conn => {
-      switch settled.contents {
-      | true => ()
-      | false =>
-        settled := true
-        resolve(conn)
-      }
+  let disconnectIfActive = () =>
+    switch connectionRef.contents {
+    | Some(conn) if conn->isActive => conn->disconnect
+    | Some(_) | None => ()
     }
 
-    let rejectOnce = error => {
-      switch settled.contents {
-      | true => ()
-      | false =>
-        settled := true
-        disconnectIfActive()
-        reject(toExn(error))
-      }
-    }
+  let connect = () => {
+    let builder =
+      makeDbConnectionBuilder(C.remoteModule, dbConfig => makeDbConnectionImpl(dbConfig))
+      ->withUri(C.uri)
+      ->withDatabaseName(C.databaseName)
 
-    builder
-    ->onConnect(conn => {
-      try {
-        switch allTables {
-        | Some(tables) if tables->Array.length > 0 =>
-          let queries = tables->Array.map(tableName => `SELECT * FROM ${tableName}`)
-          conn
-          ->subscriptionBuilder
-          ->onApplied(() => resolveOnce(conn))
-          ->onSubError((_ctx, error) => rejectOnce(error->Obj.magic))
-          ->subscribe(queries)
-        | Some(_) | None => resolveOnce(conn)
+    let connectPromise = Promise.make((resolve, reject) => {
+      let settled = ref(false)
+
+      let resolveOnce = conn => {
+        switch settled.contents {
+        | true => ()
+        | false =>
+          settled := true
+          resolve(conn)
         }
+      }
+
+      let rejectOnce = error => {
+        switch settled.contents {
+        | true => ()
+        | false =>
+          settled := true
+          disconnectIfActive()
+          reject(toExn(error))
+        }
+      }
+
+      builder
+      ->onConnect((conn, _identity, _token) => {
+        try {
+          switch C.allTableNames {
+          | tables if tables->Array.length > 0 =>
+            let queries = tables->Array.map(tableName => `SELECT * FROM ${tableName}`)
+            conn
+            ->subscriptionBuilder
+            ->onApplied(() => resolveOnce(conn))
+            ->onSubError((_ctx, error) => rejectOnce(error->Obj.magic))
+            ->subscribe(queries)
+          | _ => resolveOnce(conn)
+          }
+        } catch {
+        | JsExn(jsExn) => rejectOnce(jsExn->Obj.magic)
+        | exn => rejectOnce(exn->Obj.magic)
+        }
+      })
+      ->onConnectError((_ctx, error) => rejectOnce(error->Obj.magic))
+      ->ignore
+
+      try {
+        let conn = builder->buildConnection
+        connectionRef := Some(conn)
       } catch {
       | JsExn(jsExn) => rejectOnce(jsExn->Obj.magic)
       | exn => rejectOnce(exn->Obj.magic)
       }
     })
-    ->onConnectError((_ctx, error) => rejectOnce(error->Obj.magic))
-    ->ignore
 
-    try {
-      let conn = builder->buildConnection
-      serverConnection := Some(conn)
-    } catch {
-    | JsExn(jsExn) => rejectOnce(jsExn->Obj.magic)
-    | exn => rejectOnce(exn->Obj.magic)
-    }
-  })
+    connectPromise->withTimeout(C.connectTimeoutMs)
+  }
 
-  connectPromise->withTimeout(Some(timeoutMs))
-}
-
-// --- Public API ---
-
-let configureServerConnection = config => {
-  disconnectIfActive()
-  serverConnectionConfig := Some(config)
-  serverConnection := None
-  serverConnectionPromise := None
-}
-
-let getConnection = () =>
-  switch serverConnectionConfig.contents {
-  | None =>
-    JsError.throwWithMessage(
-      "Server connection is not configured. Call configureServerConnection(config) first.",
-    )
-  | Some(config) =>
-    switch serverConnectionPromise.contents {
+  let getConnection = () =>
+    switch promiseRef.contents {
     | Some(existingPromise) => existingPromise
     | None =>
       let p =
-        connectServerConnection(config)->Promise.catch(error => {
-          serverConnectionPromise := None
+        connect()->Promise.catch(error => {
+          promiseRef := None
           throw(error)
         })
-      serverConnectionPromise := Some(p)
+      promiseRef := Some(p)
       p
     }
-  }
 
-let resetServerConnectionForTests = () => {
-  disconnectIfActive()
-  serverConnection := None
-  serverConnectionConfig := None
-  serverConnectionPromise := None
+  let resetForTests = () => {
+    disconnectIfActive()
+    connectionRef := None
+    promiseRef := None
+  }
 }
