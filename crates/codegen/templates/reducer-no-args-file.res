@@ -1,8 +1,8 @@
 {{self.header}}
 
-@send external {{self.accessor}}: StdbTypes.reducers => promise<unit> = "{{self.accessor}}"
+@send external {{self.accessor}}: StdbSdk.reducers => promise<unit> = "{{self.accessor}}"
 
-let call = (conn: StdbTypes.connection) =>
+let call = (conn: StdbSdk.connection) =>
   conn->StdbClient.reducers->{{self.accessor}}
 
 {{self.react_hooks}}

@@ -1,1 +1,1 @@
-      {constraintName: "{{self.constraint_name}}", constraint: "unique", columns: [{{self.columns_str}}]},
+      {constraintName: "{{self.constraint_name}}", constraint_: "unique", columns: [{{self.columns_str}}]},

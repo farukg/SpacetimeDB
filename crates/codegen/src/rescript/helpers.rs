@@ -118,15 +118,15 @@ pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRef
         AlgebraicTypeUse::String => "string".to_string(),
         AlgebraicTypeUse::Timestamp => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "timestamp".to_string(),
-            TypeRefStyle::External => "StdbTypes.timestamp".to_string(),
+            TypeRefStyle::External => "StdbSdk.timestamp".to_string(),
         },
         AlgebraicTypeUse::TimeDuration => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "timeDuration".to_string(),
-            TypeRefStyle::External => "StdbTypes.timeDuration".to_string(),
+            TypeRefStyle::External => "StdbSdk.timeDuration".to_string(),
         },
         AlgebraicTypeUse::ScheduleAt => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "scheduleAt".to_string(),
-            TypeRefStyle::External => "StdbTypes.scheduleAt".to_string(),
+            TypeRefStyle::External => "StdbSdk.scheduleAt".to_string(),
         },
         AlgebraicTypeUse::Option(inner) => {
             let inner_str = render_res_type(module, inner, style);

@@ -18,6 +18,7 @@ use super::templates::{
     SchemaProductBindingRes, SchemaProductElementRes, SchemaReducerEntryRes, SchemaSumBindingRes, SchemaTableEntryRes,
     SchemaVariantElementRes, StdbSchemaRes,
 };
+use super::topo::{topological_groups, TypeGroup};
 use crate::util::{
     collect_case, is_reducer_invokable, iter_constraints, iter_indexes, iter_procedures, iter_reducers, iter_tables,
     iter_types, iter_views,
@@ -25,20 +26,36 @@ use crate::util::{
 use crate::{CodegenOptions, OutputFile};
 
 use convert_case::{Case, Casing};
+use spacetimedb_lib::sats::AlgebraicTypeRef;
 use spacetimedb_lib::version::spacetimedb_lib_version;
 use spacetimedb_schema::def::ModuleDef;
 use spacetimedb_schema::identifier::Identifier;
 use spacetimedb_schema::type_for_generate::AlgebraicTypeDef;
+use std::collections::HashMap;
 use std::ops::Deref;
 
 pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFile {
     let cli_version = spacetimedb_lib_version();
 
-    // ── Named type bindings (topo-sorted by iter_types) ──────────────
+    // ── Named type bindings (topologically sorted — dependencies first) ──
     let types: Vec<_> = iter_types(module).collect();
+    // Build AlgebraicTypeRef → TypeDef lookup for topo-sorted iteration
+    let ref_to_typedef: HashMap<AlgebraicTypeRef, &_> = types.iter().map(|t| (t.ty, *t)).collect();
+    let type_refs: Vec<AlgebraicTypeRef> = types.iter().map(|t| t.ty).collect();
+    let groups = topological_groups(module, &type_refs);
+    // Flatten topo groups into ordered refs
+    let topo_ordered_refs: Vec<AlgebraicTypeRef> = groups
+        .into_iter()
+        .flat_map(|g| match g {
+            TypeGroup::Standalone(r) => vec![r],
+            TypeGroup::SelfRecursive(r) => vec![r],
+            TypeGroup::MutuallyRecursive(rs) => rs,
+        })
+        .collect();
     let type_bindings_str = {
         let mut buf = String::new();
-        for ty in &types {
+        for type_ref in &topo_ordered_refs {
+            let ty = ref_to_typedef[type_ref];
             let pascal_name = collect_case(Case::Pascal, ty.accessor_name.name_segments());
             let binding_name = schema_type_binding_name(&pascal_name);
 

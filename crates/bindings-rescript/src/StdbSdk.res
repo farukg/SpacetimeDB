@@ -207,7 +207,7 @@ type indexDef = {
 
 type constraintDef = {
   constraintName: string,
-  constraint: string,
+  @as("constraint") constraint_: string,
   columns: array<string>,
 }
 

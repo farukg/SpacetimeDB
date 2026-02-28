@@ -1,9 +1,9 @@
 {{self.header}}
 
 {{self.args_record}}
-@send external {{self.accessor}}: (StdbTypes.reducers, args) => promise<unit> = "{{self.accessor}}"
+@send external {{self.accessor}}: (StdbSdk.reducers, args) => promise<unit> = "{{self.accessor}}"
 
-let call = (conn: StdbTypes.connection, {{self.call_params}}) =>
+let call = (conn: StdbSdk.connection, {{self.call_params}}) =>
   conn->StdbClient.reducers->{{self.accessor}}({
 {{self.call_body_fields}}
   })

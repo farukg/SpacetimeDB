@@ -2,4 +2,4 @@
 // WILL NOT BE SAVED. MODIFY TABLES IN YOUR MODULE SOURCE CODE INSTEAD.
 
 @module("@spacetimedb/rescript/react") @react.component
-external make: (~connectionBuilder: StdbTypes.connectionBuilder, ~children: React.element) => React.element = "SpacetimeDBProvider"
+external make: (~connectionBuilder: StdbSdk.connectionBuilder, ~children: React.element) => React.element = "SpacetimeDBProvider"
