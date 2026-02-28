@@ -671,24 +671,51 @@ export const SumType = {
         }
       };
     } else {
+      // Plain enum fast path: all variants are unit → accept bare strings.
+      // ReScript compiles bare variants to strings ("AG", "GmbH").
+      const isPlainEnum = ty.variants.every(
+        v =>
+          v.algebraicType.tag === 'Product' &&
+          v.algebraicType.value.elements.length === 0
+      );
+      if (isPlainEnum) {
+        const indexMap: Record<string, number> = {};
+        for (let i = 0; i < ty.variants.length; i++) {
+          indexMap[ty.variants[i].name!] = i;
+        }
+        const serializer: Serializer<any> = (writer, value) => {
+          const name = typeof value === 'string' ? value : value.tag;
+          const idx = indexMap[name];
+          if (idx === undefined) {
+            throw new TypeError(
+              `Could not serialize plain enum; unknown variant ${JSON.stringify(name)}`
+            );
+          }
+          writer.writeByte(idx);
+        };
+        SERIALIZERS.set(ty, serializer);
+        return serializer;
+      }
+
       let serializer = SERIALIZERS.get(ty);
       if (serializer != null) return serializer;
 
       const serializers: Record<string, Serializer<any>> = {};
 
       const body = `\
-switch (value.tag) {
+var tag = typeof value === 'string' ? value : value.tag;
+switch (tag) {
 ${ty.variants
   .map(
     ({ name }, i) => `\
   case ${JSON.stringify(name!)}:
     writer.writeByte(${i});
-    return this.${name!}(writer, value.value);`
+    return this.${name!}(writer, typeof value === 'object' ? value.value : undefined);`
   )
   .join('\n')}
   default:
     throw new TypeError(
-      \`Could not serialize sum type; unknown tag \${value.tag}\`
+      \`Could not serialize sum type; unknown tag \${tag}\`
     )
 }
 `;

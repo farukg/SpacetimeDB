@@ -7,7 +7,8 @@
     "type": "module",
     "main": "src/js_exports.mjs",
     "exports": {
-        ".": "./src/js_exports.mjs"
+        ".": "./src/js_exports.mjs",
+        "./react": "./src/js_react_exports.mjs"
     },
     "files": [
         "src",
@@ -20,7 +21,8 @@
         "watch": "rescript build -w"
     },
     "peerDependencies": {
-        "rescript": "^12.0.0"
+        "rescript": "^12.0.0",
+        "react": "^18.0.0 || ^19.0.0"
     },
     "dependencies": {
         "@rescript/core": "^1.6.0",

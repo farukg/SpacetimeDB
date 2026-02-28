@@ -49,7 +49,7 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions)
     writeln!(out, "");
     writeln!(
         out,
-        "import {{ schema, table, reducers, reducerSchema, procedures, procedureSchema, t, makeQueryBuilder, convertToAccessorMap }} from \"@spacetimedb/rescript\";"
+        "import {{ schema, table, reducers as reducersBuilder, reducerSchema, procedures, procedureSchema, t, makeQueryBuilder, convertToAccessorMap }} from \"@spacetimedb/rescript\";"
     );
     writeln!(out, "");
 
@@ -195,7 +195,7 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions)
     writeln!(out, "}});");
     writeln!(out, "");
 
-    writeln!(out, "const reducersSchema = reducers(");
+    writeln!(out, "const reducersSchema = reducersBuilder(");
     out.indent(1);
     for reducer in iter_reducers(module, options.visibility) {
         if !is_reducer_invokable(reducer) {
