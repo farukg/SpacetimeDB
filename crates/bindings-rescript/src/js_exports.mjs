@@ -3,9 +3,9 @@ export {
   configureServerConnection,
   getConnection,
   resetServerConnectionForTests,
-} from "./StdbServerConnection.mjs";
+} from "./StdbServerConnection.res.mjs";
 export {
   normalizeRow,
   encodeStdbValue,
   encodeIdentityHex,
-} from "./StdbTransport.mjs";
+} from "./StdbTransport.res.mjs";

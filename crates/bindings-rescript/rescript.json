@@ -13,7 +13,7 @@
             "in-source": true
         }
     ],
-    "suffix": ".mjs",
+    "suffix": ".res.mjs",
     "dependencies": [
         "@rescript/core"
     ],
