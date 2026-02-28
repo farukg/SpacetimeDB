@@ -1022,7 +1022,7 @@ let call = (conn: StdbTypes.connection, ~name: string) =>
   })
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<args> = "reducers.addPlayer"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1041,7 +1041,7 @@ let call = (conn: StdbTypes.connection, ~name: string) =>
   })
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<args> = "reducers.addPrivate"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1062,7 +1062,7 @@ let call = (conn: StdbTypes.connection, ~name: string, ~age: int) =>
   })
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<args> = "reducers.add"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1076,7 +1076,7 @@ let call = (conn: StdbTypes.connection) =>
   conn->StdbClient.reducers->assertCallerIdentityIsModuleIdentity
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<unit> = "reducers.assertCallerIdentityIsModuleIdentity"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1095,7 +1095,7 @@ let call = (conn: StdbTypes.connection, ~id: bigint) =>
   })
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<args> = "reducers.deletePlayer"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1114,7 +1114,7 @@ let call = (conn: StdbTypes.connection, ~name: string) =>
   })
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<args> = "reducers.deletePlayersByName"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1133,7 +1133,7 @@ let call = (conn: StdbTypes.connection, ~age: int) =>
   })
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<args> = "reducers.listOverAge"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1147,7 +1147,7 @@ let call = (conn: StdbTypes.connection) =>
   conn->StdbClient.reducers->logModuleIdentity
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<unit> = "reducers.logModuleIdentity"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1161,7 +1161,7 @@ let call = (conn: StdbTypes.connection) =>
   conn->StdbClient.reducers->queryPrivate
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<unit> = "reducers.queryPrivate"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1175,7 +1175,7 @@ let call = (conn: StdbTypes.connection) =>
   conn->StdbClient.reducers->sayHello
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<unit> = "reducers.sayHello"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1189,7 +1189,7 @@ let call = (conn: StdbTypes.connection) =>
   conn->StdbClient.reducers->testBtreeIndexArgs
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<unit> = "reducers.testBtreeIndexArgs"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1214,7 +1214,7 @@ let call = (conn: StdbTypes.connection, ~arg: StdbTypes.TestA.t, ~arg2: StdbType
   })
 
 // React hook — typed reducer binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external reducerDef: StdbReact.reducerDef<args> = "reducers.test"
 
 let useCall = () => StdbReact.useReducer(reducerDef)'''
@@ -1244,7 +1244,7 @@ type identityIndex
 let tableName = "logged_out_player"
 
 // React hook — typed query binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external query: StdbReact.query<t> = "tables.logged_out_player"
 
 let useRows = () => StdbReact.useTable(query)
@@ -1270,7 +1270,7 @@ type handle
 let tableName = "my_player"
 
 // React hook — typed query binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external query: StdbReact.query<t> = "tables.my_player"
 
 let useRows = () => StdbReact.useTable(query)
@@ -1301,7 +1301,7 @@ type idIndex
 let tableName = "person"
 
 // React hook — typed query binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external query: StdbReact.query<t> = "tables.person"
 
 let useRows = () => StdbReact.useTable(query)
@@ -1332,7 +1332,7 @@ type identityIndex
 let tableName = "player"
 
 // React hook — typed query binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external query: StdbReact.query<t> = "tables.player"
 
 let useRows = () => StdbReact.useTable(query)
@@ -1356,7 +1356,7 @@ type handle
 let tableName = "test_d"
 
 // React hook — typed query binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external query: StdbReact.query<t> = "tables.test_d"
 
 let useRows = () => StdbReact.useTable(query)
@@ -1380,7 +1380,7 @@ type handle
 let tableName = "test_f"
 
 // React hook — typed query binding
-@module("../StdbSchema.mjs") @val
+@module("../StdbSchema.res.mjs") @val
 external query: StdbReact.query<t> = "tables.test_f"
 
 let useRows = () => StdbReact.useTable(query)
