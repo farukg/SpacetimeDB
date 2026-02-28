@@ -1,0 +1,1 @@
+  @as("{{self.accessor}}") {{self.camel}}: {{self.table_module}}.handle,

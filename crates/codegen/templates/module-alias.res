@@ -1,0 +1,1 @@
+module {{self.alias}} = {{self.target}}

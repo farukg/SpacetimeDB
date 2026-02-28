@@ -3,7 +3,8 @@
 //! Generates `.res` and `.mjs` files from a SpacetimeDB module definition.
 //! Split into submodules by concern:
 //!
-//! - `helpers` — name munging, `TypeRefStyle`, record/sum/enum type writers
+//! - `templates` — `#[derive(Boilerplate)]` struct definitions (3-layer composition)
+//! - `helpers` — name munging, `TypeRefStyle`, record/sum/enum type renderers
 //! - `topo` — Tarjan's SCC + topological sort for type emission ordering
 //! - `types` — `StdbTypes.res` generator (per-type submodules)
 //! - `client` — `StdbClient.res` generator (db record + connection externals)
@@ -18,19 +19,24 @@ mod index_file;
 mod react;
 mod schema;
 mod server_reducers;
+pub(super) mod templates;
 mod topo;
 mod types;
 
-use crate::util::{is_reducer_invokable, print_auto_generated_file_comment};
+use crate::util::is_reducer_invokable;
 use crate::{CodegenOptions, OutputFile};
 
-use super::code_indenter::CodeIndenter;
 use super::Lang;
-use helpers::{rescript_field_name, table_module_name, write_record_type, write_res_type, TypeRefStyle};
+use helpers::{render_record_type, render_res_type, rescript_field_name, table_module_name, TypeRefStyle};
+use templates::{
+    AutoGenHeaderRes, PkIndexSectionRes, ProcedureFileRes, ReducerNoArgsFileRes, ReducerReactHookSectionRes,
+    ReducerWithArgsFileRes, TableFileRes, TableReactHookSectionRes,
+};
 
 use convert_case::{Case, Casing};
 use spacetimedb_schema::def::{ModuleDef, ProcedureDef, ReducerDef, TableDef};
 use spacetimedb_schema::schema::TableSchema;
+use std::fmt::Write;
 use std::ops::Deref;
 
 const INDENT: &str = "  ";
@@ -39,101 +45,55 @@ pub struct ReScript;
 
 impl Lang for ReScript {
     /// Generates `Stdb[TableName]Table.res` — one file per table.
-    ///
-    /// Contains:
-    /// - Row record type (`type t = { ... }`)
-    /// - Opaque table handle type (`type handle`)
-    /// - `@send iter` binding
-    /// - `@send onInsert / onUpdate / onDelete` bindings
-    /// - `isAlive` helper (if table has `deleted_at` field)
-    /// - PK index type + `@get` accessor + `@send find` (if table has a primary key)
     fn generate_table_file_from_schema(
         &self,
         module: &ModuleDef,
         table: &TableDef,
         _schema: TableSchema,
     ) -> OutputFile {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
-
-        print_auto_generated_file_comment(out);
-        writeln!(out, "");
-
         let type_ref = table.product_type_ref;
         let product_def = module.typespace_for_generate()[type_ref].as_product().unwrap();
 
-        // Row record type
-        write_record_type(module, out, "t", &product_def.elements, TypeRefStyle::External);
+        // Pre-render row record type.
+        let row_type = render_record_type(module, "t", &product_def.elements, TypeRefStyle::External);
 
-        // Opaque table handle type
-        writeln!(out, "// Opaque table handle — obtained from StdbClient.db");
-        writeln!(out, "type handle");
-        writeln!(out, "");
+        // Pre-render PK index section.
+        let pk_section_str;
+        let pk_section: &str = if let Some(pk_col) = table.primary_key {
+            let (pk_field, pk_type) = &product_def.elements[pk_col.idx()];
+            let pk_field_raw = pk_field.deref();
+            let pk_field_camel = rescript_field_name(pk_field_raw.to_case(Case::Camel));
+            let type_buf = render_res_type(module, pk_type, TypeRefStyle::External);
 
-        // iter: handle → Iterator.t<t>
-        writeln!(out, "@send external iter: handle => Iterator.t<t> = \"iter\"");
+            pk_section_str = PkIndexSectionRes {
+                field_camel: &pk_field_camel,
+                field_raw: pk_field_raw,
+                find_param_type: &type_buf,
+            }
+            .to_string();
+            &pk_section_str
+        } else {
+            ""
+        };
 
-        // onInsert / onUpdate / onDelete
-        writeln!(
-            out,
-            "@send external onInsert: (handle, (StdbTypes.eventCtx, t) => unit) => unit = \"onInsert\""
-        );
-        writeln!(
-            out,
-            "@send external onUpdate: (handle, (StdbTypes.eventCtx, t, t) => unit) => unit = \"onUpdate\""
-        );
-        writeln!(
-            out,
-            "@send external onDelete: (handle, (StdbTypes.eventCtx, t) => unit) => unit = \"onDelete\""
-        );
-        writeln!(out, "");
-
-        // isAlive: soft-delete pattern
         let has_deleted_at = product_def
             .elements
             .iter()
             .any(|(field_name, _)| field_name.deref() == "deleted_at");
 
-        if has_deleted_at {
-            writeln!(out, "let isAlive = (row: t) => row.deletedAt->Option.isNone");
-            writeln!(out, "");
-        }
-
-        // PK index: type + @get accessor + @send find
-        if let Some(pk_col) = table.primary_key {
-            let (pk_field, pk_type) = &product_def.elements[pk_col.idx()];
-            let pk_field_raw = pk_field.deref(); // snake_case — runtime SSOT
-            let pk_field_camel = rescript_field_name(pk_field_raw.to_case(Case::Camel));
-
-            writeln!(out, "// PK index");
-            writeln!(out, "type {pk_field_camel}Index");
-            // @get string = raw field name (snake_case) — SDK attaches index via idxDef.name
-            writeln!(
-                out,
-                "@get external {pk_field_camel}: handle => {pk_field_camel}Index = \"{pk_field_raw}\""
-            );
-            write!(out, "@send external find: ({pk_field_camel}Index, ");
-            write_res_type(module, out, pk_type, TypeRefStyle::External);
-            writeln!(out, ") => Nullable.t<t> = \"find\"");
-            writeln!(out, "");
-        }
-
-        // Table name constant
-        writeln!(out, "let tableName = \"{}\"", table.name);
-
-        // React hook bindings — typed via phantom StdbReact.query<t>
-        writeln!(out, "");
-        writeln!(out, "// React hook — typed query binding");
         let accessor = table.accessor_name.deref();
-        writeln!(out, "@module(\"../StdbSchema.mjs\") @val");
-        writeln!(out, "external query: StdbReact.query<t> = \"tables.{accessor}\"");
-        writeln!(out, "");
-        writeln!(out, "let useRows = () => StdbReact.useTable(query)");
-        writeln!(out, "let useRowsWith = (cbs) => StdbReact.useTableWith(query, cbs)");
 
         OutputFile {
             filename: format!("tables/{}.res", table_module_name(&table.accessor_name)),
-            code: output.into_inner(),
+            code: TableFileRes {
+                header: AutoGenHeaderRes,
+                row_type: row_type.trim_end(),
+                has_deleted_at,
+                pk_section,
+                table_name: &table.name,
+                react_hooks: TableReactHookSectionRes { accessor },
+            }
+            .to_string(),
         }
     }
 
@@ -142,13 +102,7 @@ impl Lang for ReScript {
     }
 
     /// Generates `Stdb[ReducerName]Reducer.res` — one file per reducer.
-    ///
-    /// Contains:
-    /// - Args record type (`type args = { ... }`) — omitted if reducer has no params
-    /// - `@send` binding on `StdbTypes.reducers`
-    /// - Typed helper function
     fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
-        // Skip non-invokable lifecycle reducers (init, update, etc.)
         if !is_reducer_invokable(reducer) {
             return OutputFile {
                 filename: format!("reducers/{}.res", helpers::reducer_module_name(&reducer.name)),
@@ -156,103 +110,93 @@ impl Lang for ReScript {
             };
         }
 
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
-
-        print_auto_generated_file_comment(out);
-        writeln!(out, "");
-
         let accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
+        let camel_accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
         let elements = &reducer.params_for_generate.elements;
 
         if elements.is_empty() {
-            // No-arg reducer: @send binding + unit helper
-            writeln!(
-                out,
-                "@send external {accessor}: StdbTypes.reducers => promise<unit> = \"{accessor}\""
-            );
-            writeln!(out, "");
-            writeln!(out, "let call = (conn: StdbTypes.connection) =>");
-            writeln!(out, "  conn->StdbClient.reducers->{accessor}");
-        } else {
-            // Args record type
-            write_record_type(module, out, "args", elements, TypeRefStyle::External);
-
-            // @send binding
-            writeln!(
-                out,
-                "@send external {accessor}: (StdbTypes.reducers, args) => promise<unit> = \"{accessor}\""
-            );
-            writeln!(out, "");
-
-            // Typed helper — constructs the `args` record and calls the @send binding.
-            write!(out, "let call = (conn: StdbTypes.connection, ");
-            for (i, (field, ty)) in elements.iter().enumerate() {
-                let field_name = rescript_field_name(field.deref().to_case(Case::Camel));
-                write!(out, "~{field_name}: ");
-                write_res_type(module, out, ty, TypeRefStyle::External);
-                if i < elements.len() - 1 {
-                    write!(out, ", ");
+            OutputFile {
+                filename: format!("reducers/{}.res", helpers::reducer_module_name(&reducer.name)),
+                code: ReducerNoArgsFileRes {
+                    header: AutoGenHeaderRes,
+                    accessor: &accessor,
+                    react_hooks: ReducerReactHookSectionRes {
+                        params_type: "unit",
+                        camel_accessor: &camel_accessor,
+                    },
                 }
+                .to_string(),
             }
-            writeln!(out, ") =>");
-            out.indent(1);
-            writeln!(out, "conn->StdbClient.reducers->{accessor}({{");
-            out.indent(1);
-            for (field, _ty) in elements.iter() {
-                let camel = rescript_field_name(field.deref().to_case(Case::Camel));
-                writeln!(out, "{camel}: {camel},");
+        } else {
+            // Pre-render args record type.
+            let args_record = render_record_type(module, "args", elements, TypeRefStyle::External);
+
+            // Pre-render labeled params for `let call`.
+            let call_params = {
+                let mut buf = String::new();
+                for (i, (field, ty)) in elements.iter().enumerate() {
+                    let field_name = rescript_field_name(field.deref().to_case(Case::Camel));
+                    let type_str = render_res_type(module, ty, TypeRefStyle::External);
+                    write!(buf, "~{field_name}: {type_str}").unwrap();
+                    if i < elements.len() - 1 {
+                        buf.push_str(", ");
+                    }
+                }
+                buf
+            };
+
+            // Pre-render record construction fields.
+            let call_body_fields = {
+                let mut buf = String::new();
+                for (field, _ty) in elements.iter() {
+                    let camel = rescript_field_name(field.deref().to_case(Case::Camel));
+                    writeln!(buf, "    {camel}: {camel},").unwrap();
+                }
+                buf
+            };
+
+            OutputFile {
+                filename: format!("reducers/{}.res", helpers::reducer_module_name(&reducer.name)),
+                code: ReducerWithArgsFileRes {
+                    header: AutoGenHeaderRes,
+                    args_record: args_record.trim_end(),
+                    accessor: &accessor,
+                    call_params: &call_params,
+                    call_body_fields: call_body_fields.trim_end(),
+                    react_hooks: ReducerReactHookSectionRes {
+                        params_type: "args",
+                        camel_accessor: &camel_accessor,
+                    },
+                }
+                .to_string(),
             }
-            out.dedent(1);
-            writeln!(out, "}})");
-            out.dedent(1);
-        }
-
-        // React hook binding — typed reducer caller
-        writeln!(out, "");
-        writeln!(out, "// React hook — typed reducer binding");
-        let camel_accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
-        let params_type = if elements.is_empty() { "unit" } else { "args" };
-        writeln!(out, "@module(\"../StdbSchema.mjs\") @val");
-        writeln!(
-            out,
-            "external reducerDef: StdbReact.reducerDef<{params_type}> = \"reducers.{camel_accessor}\""
-        );
-        writeln!(out, "");
-        writeln!(out, "let useCall = () => StdbReact.useReducer(reducerDef)");
-
-        OutputFile {
-            filename: format!("reducers/{}.res", helpers::reducer_module_name(&reducer.name)),
-            code: output.into_inner(),
         }
     }
 
     fn generate_procedure_file(&self, module: &ModuleDef, procedure: &ProcedureDef) -> OutputFile {
-        let mut output = CodeIndenter::new(String::new(), INDENT);
-        let out = &mut output;
-
-        print_auto_generated_file_comment(out);
-        writeln!(out, "");
-
-        write_record_type(
+        // Pre-render params record type.
+        let params_record = render_record_type(
             module,
-            out,
             "params",
             &procedure.params_for_generate.elements,
             TypeRefStyle::External,
         );
-        writeln!(out, "");
-        write!(out, "type result = ");
-        write_res_type(module, out, &procedure.return_type_for_generate, TypeRefStyle::External);
-        writeln!(out, "");
-        writeln!(out, "let procedureName = \"{}\"", procedure.name);
+
+        // Pre-render result type expression.
+        let result_type = render_res_type(module, &procedure.return_type_for_generate, TypeRefStyle::External);
 
         OutputFile {
             filename: format!(
                 "procedures/{}.res",
                 helpers::procedure_module_name(&procedure.accessor_name)
             ),
-            code: output.into_inner(),
+            code: ProcedureFileRes {
+                header: AutoGenHeaderRes,
+                params_record: params_record.trim_end(),
+                result_type: &result_type,
+                procedure_name: &procedure.name,
+            }
+            .to_string(),
         }
     }
 

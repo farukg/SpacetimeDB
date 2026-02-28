@@ -2,8 +2,13 @@
 //!
 //! `TypeRefStyle` replaces the old `in_types_file: bool` parameter with a clear enum
 //! that handles the three possible reference contexts.
+//!
+//! All `render_*` functions return owned `String`s. Type dispatch (`render_res_type`)
+//! stays in Rust; structural composition uses boilerplate templates.
 
-use crate::code_indenter::Indenter;
+use super::templates::{
+    EnumVariantRes, PlainEnumDeclRes, RecordFieldRes, RecordTypeDeclRes, SumTypeDeclRes, SumVariantRes, UnitTypeDeclRes,
+};
 use crate::util::type_ref_name;
 
 use convert_case::{Case, Casing};
@@ -99,172 +104,189 @@ pub fn procedure_module_name(procedure_name: &Identifier) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Type rendering
+// Type rendering (pre-render boundary — stays in Rust, returns String)
 // ---------------------------------------------------------------------------
 
-/// Write a ReScript type reference for `AlgebraicTypeUse`.
+/// Render a ReScript type expression for `AlgebraicTypeUse` into a `String`.
 ///
-/// `style` controls how `Ref` types are qualified.
-pub fn write_res_type(module: &ModuleDef, out: &mut Indenter, ty: &AlgebraicTypeUse, style: TypeRefStyle) {
+/// This is the pre-render boundary: recursive type dispatch must happen in Rust,
+/// but the result is a plain string that boilerplate templates embed via `{{...}}`.
+pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRefStyle) -> String {
     match ty {
-        AlgebraicTypeUse::Unit => {
-            write!(out, "unit");
-        }
-        AlgebraicTypeUse::Never => {
-            write!(out, "unit");
-        }
-        AlgebraicTypeUse::Identity | AlgebraicTypeUse::ConnectionId | AlgebraicTypeUse::Uuid => {
-            write!(out, "string");
-        }
+        AlgebraicTypeUse::Unit | AlgebraicTypeUse::Never => "unit".to_string(),
+        AlgebraicTypeUse::Identity | AlgebraicTypeUse::ConnectionId | AlgebraicTypeUse::Uuid => "string".to_string(),
+        AlgebraicTypeUse::String => "string".to_string(),
         AlgebraicTypeUse::Timestamp => match style {
-            TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => write!(out, "timestamp"),
-            TypeRefStyle::External => write!(out, "StdbTypes.timestamp"),
+            TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "timestamp".to_string(),
+            TypeRefStyle::External => "StdbTypes.timestamp".to_string(),
         },
         AlgebraicTypeUse::TimeDuration => match style {
-            TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => write!(out, "timeDuration"),
-            TypeRefStyle::External => write!(out, "StdbTypes.timeDuration"),
+            TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "timeDuration".to_string(),
+            TypeRefStyle::External => "StdbTypes.timeDuration".to_string(),
         },
         AlgebraicTypeUse::ScheduleAt => match style {
-            TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => write!(out, "scheduleAt"),
-            TypeRefStyle::External => write!(out, "StdbTypes.scheduleAt"),
+            TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "scheduleAt".to_string(),
+            TypeRefStyle::External => "StdbTypes.scheduleAt".to_string(),
         },
         AlgebraicTypeUse::Option(inner) => {
-            write!(out, "option<");
-            write_res_type(module, out, inner, style);
-            write!(out, ">");
+            let inner_str = render_res_type(module, inner, style);
+            format!("option<{inner_str}>")
         }
         AlgebraicTypeUse::Result { ok_ty, err_ty } => {
-            write!(out, "result<");
-            write_res_type(module, out, ok_ty, style);
-            write!(out, ", ");
-            write_res_type(module, out, err_ty, style);
-            write!(out, ">");
+            let ok_str = render_res_type(module, ok_ty, style);
+            let err_str = render_res_type(module, err_ty, style);
+            format!("result<{ok_str}, {err_str}>")
         }
         AlgebraicTypeUse::Primitive(prim) => match prim {
-            PrimitiveType::Bool => write!(out, "bool"),
+            PrimitiveType::Bool => "bool".to_string(),
             PrimitiveType::I8
             | PrimitiveType::U8
             | PrimitiveType::I16
             | PrimitiveType::U16
             | PrimitiveType::I32
-            | PrimitiveType::U32 => write!(out, "int"),
+            | PrimitiveType::U32 => "int".to_string(),
             PrimitiveType::I64
             | PrimitiveType::U64
             | PrimitiveType::I128
             | PrimitiveType::U128
             | PrimitiveType::I256
-            | PrimitiveType::U256 => write!(out, "bigint"),
-            PrimitiveType::F32 | PrimitiveType::F64 => write!(out, "float"),
+            | PrimitiveType::U256 => "bigint".to_string(),
+            PrimitiveType::F32 | PrimitiveType::F64 => "float".to_string(),
         },
-        AlgebraicTypeUse::String => {
-            write!(out, "string");
-        }
         AlgebraicTypeUse::Array(inner) => {
-            write!(out, "array<");
-            write_res_type(module, out, inner, style);
-            write!(out, ">");
+            let inner_str = render_res_type(module, inner, style);
+            format!("array<{inner_str}>")
         }
         AlgebraicTypeUse::Ref(reference) => {
             let pascal_name = type_ref_name(module, *reference);
             let module_name = rescript_module_name(&pascal_name);
             match style {
-                TypeRefStyle::InTypesFile => {
-                    // Sibling module inside StdbTypes.res: AccountId.t
-                    write!(out, "{module_name}.t");
-                }
-                TypeRefStyle::InRecursiveGroup => {
-                    // Inside a recursive group: use the lowercased type alias name
-                    let type_alias = rescript_type_name(pascal_name);
-                    write!(out, "{type_alias}");
-                }
-                TypeRefStyle::External => {
-                    // From outside StdbTypes.res: StdbTypes.AccountId.t
-                    write!(out, "StdbTypes.{module_name}.t");
-                }
+                TypeRefStyle::InTypesFile => format!("{module_name}.t"),
+                TypeRefStyle::InRecursiveGroup => rescript_type_name(pascal_name),
+                TypeRefStyle::External => format!("StdbTypes.{module_name}.t"),
             }
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Record / Sum type emission
+// Record / Sum / Enum type rendering (boilerplate-based, return String)
 // ---------------------------------------------------------------------------
 
-/// Write `type <name> = { @as("raw") camel: T, ... }` (no `rec`).
-pub fn write_record_type(
+/// Intermediate data for a record field — owns the strings so `RecordFieldRes` can borrow.
+struct RecordFieldData {
+    raw: String,
+    camel: String,
+    type_str: String,
+}
+
+/// Render `type <name> = { @as("raw") camel: T, ... }` (no `rec`).
+pub fn render_record_type(
     module: &ModuleDef,
-    out: &mut Indenter,
     name: &str,
     elements: &[(Identifier, AlgebraicTypeUse)],
     style: TypeRefStyle,
-) {
-    write_record_type_kw(module, out, "type", name, elements, style);
+) -> String {
+    render_record_type_kw(module, "type", name, elements, style)
 }
 
-/// Write `<keyword> <name> = { ... }` where keyword is `type`, `type rec`, or `and`.
-pub fn write_record_type_kw(
+/// Render `<keyword> <name> = { ... }` where keyword is `type`, `type rec`, or `and`.
+///
+/// Returns the type declaration as a `String` (with trailing newline, no trailing blank line).
+pub fn render_record_type_kw(
     module: &ModuleDef,
-    out: &mut Indenter,
     keyword: &str,
     name: &str,
     elements: &[(Identifier, AlgebraicTypeUse)],
     style: TypeRefStyle,
-) {
+) -> String {
     if elements.is_empty() {
-        writeln!(out, "{keyword} {name} = unit");
-        writeln!(out, "");
-        return;
+        return UnitTypeDeclRes { keyword, name }.to_string();
     }
 
-    writeln!(out, "{keyword} {name} = {{");
-    out.indent(1);
-    for (field, ty) in elements {
-        let raw = field.deref();
-        let camel = rescript_field_name(raw.to_case(Case::Camel));
-        write!(out, "@as(\"{raw}\") ");
-        write!(out, "{camel}: ");
-        write_res_type(module, out, ty, style);
-        writeln!(out, ",");
-    }
-    out.dedent(1);
-    writeln!(out, "}}");
-    writeln!(out, "");
+    // Build owned field data, then borrow for template structs.
+    let field_data: Vec<RecordFieldData> = elements
+        .iter()
+        .map(|(field, ty)| {
+            let raw = field.deref().to_string();
+            let camel = rescript_field_name(raw.to_case(Case::Camel));
+            let type_str = render_res_type(module, ty, style);
+            RecordFieldData { raw, camel, type_str }
+        })
+        .collect();
+
+    let fields: Vec<RecordFieldRes> = field_data
+        .iter()
+        .map(|f| RecordFieldRes {
+            raw_name: &f.raw,
+            camel_name: &f.camel,
+            type_str: &f.type_str,
+        })
+        .collect();
+
+    RecordTypeDeclRes { keyword, name, fields }.to_string()
 }
 
-/// Write a sum type with `@tag("tag")` discrimination.
-pub fn write_sum_type(
+/// Intermediate data for a sum variant.
+struct SumVariantData {
+    constructor: String,
+    payload: String,
+}
+
+/// Render a sum type with `@tag("tag")` discrimination.
+///
+/// Returns the type declaration as a `String` (with trailing newline).
+pub fn render_sum_type(
     module: &ModuleDef,
-    out: &mut Indenter,
     keyword: &str,
     name: &str,
     variants: &[(Identifier, AlgebraicTypeUse)],
     style: TypeRefStyle,
-) {
-    writeln!(out, "@tag(\"tag\")");
-    writeln!(out, "{keyword} {name} =");
-    out.indent(1);
-    for (variant_name, variant_type) in variants {
-        let constructor = rescript_constructor_name(variant_name.deref());
-        if matches!(variant_type, AlgebraicTypeUse::Unit) {
-            writeln!(out, "| {constructor}");
-        } else {
-            write!(out, "| {constructor}(");
-            write_res_type(module, out, variant_type, style);
-            writeln!(out, ")");
-        }
+) -> String {
+    let variant_data: Vec<SumVariantData> = variants
+        .iter()
+        .map(|(variant_name, variant_type)| {
+            let constructor = rescript_constructor_name(variant_name.deref());
+            let payload = if matches!(variant_type, AlgebraicTypeUse::Unit) {
+                String::new()
+            } else {
+                render_res_type(module, variant_type, style)
+            };
+            SumVariantData { constructor, payload }
+        })
+        .collect();
+
+    let template_variants: Vec<SumVariantRes> = variant_data
+        .iter()
+        .map(|v| SumVariantRes {
+            constructor: &v.constructor,
+            payload: &v.payload,
+        })
+        .collect();
+
+    SumTypeDeclRes {
+        keyword,
+        name,
+        variants: template_variants,
     }
-    out.dedent(1);
-    writeln!(out, "");
+    .to_string()
 }
 
-/// Write a plain enum (all-unit variants, no `@tag` needed — compiles to strings).
-pub fn write_plain_enum(out: &mut Indenter, keyword: &str, name: &str, variants: &[Identifier]) {
-    writeln!(out, "{keyword} {name} =");
-    out.indent(1);
-    for variant in variants {
-        let constructor = rescript_constructor_name(variant.deref());
-        writeln!(out, "| {constructor}");
+/// Render a plain enum (all-unit variants, no `@tag` needed — compiles to strings).
+///
+/// Returns the type declaration as a `String` (with trailing newline).
+pub fn render_plain_enum(keyword: &str, name: &str, variants: &[Identifier]) -> String {
+    let constructor_names: Vec<String> = variants.iter().map(|v| rescript_constructor_name(v.deref())).collect();
+
+    let template_variants: Vec<EnumVariantRes> = constructor_names
+        .iter()
+        .map(|c| EnumVariantRes { constructor: c })
+        .collect();
+
+    PlainEnumDeclRes {
+        keyword,
+        name,
+        variants: template_variants,
     }
-    out.dedent(1);
-    writeln!(out, "");
+    .to_string()
 }

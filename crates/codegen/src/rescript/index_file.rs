@@ -1,62 +1,75 @@
-use crate::util::{
-    is_reducer_invokable, iter_procedures, iter_reducers, iter_table_names_and_types, print_auto_generated_file_comment,
-};
-use crate::{CodegenOptions, OutputFile};
+//! `index.res` generator — module re-exports for tables, reducers, and procedures.
 
 use super::helpers::{procedure_module_name, reducer_module_name, table_module_name};
-use crate::code_indenter::CodeIndenter;
+use super::templates::{AutoGenHeaderRes, IndexRes, ModuleAliasRes};
+use crate::util::{is_reducer_invokable, iter_procedures, iter_reducers, iter_table_names_and_types};
+use crate::{CodegenOptions, OutputFile};
 
 use convert_case::{Case, Casing};
 use spacetimedb_schema::def::ModuleDef;
 use std::ops::Deref;
 
+/// Intermediate owned data for a module alias.
+struct AliasData {
+    alias: String,
+    target: String,
+}
+
 pub(super) fn generate_index_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFile {
-    let mut output = CodeIndenter::new(String::new(), super::INDENT);
-    let out = &mut output;
+    let table_data: Vec<AliasData> = iter_table_names_and_types(module, options.visibility)
+        .map(|(_, accessor_name, _)| AliasData {
+            alias: accessor_name.deref().to_case(Case::Pascal),
+            target: table_module_name(accessor_name),
+        })
+        .collect();
 
-    print_auto_generated_file_comment(out);
-    writeln!(out, "");
-    writeln!(out, "module StdbTypes = StdbTypes");
-    writeln!(out, "module StdbClient = StdbClient");
-    writeln!(out, "");
+    let reducer_data: Vec<AliasData> = iter_reducers(module, options.visibility)
+        .filter(|r| is_reducer_invokable(r))
+        .map(|r| AliasData {
+            alias: r.accessor_name.deref().to_case(Case::Pascal),
+            target: reducer_module_name(&r.name),
+        })
+        .collect();
 
-    writeln!(out, "module Tables = {{");
-    out.indent(1);
-    for (_, accessor_name, _) in iter_table_names_and_types(module, options.visibility) {
-        let alias = accessor_name.deref().to_case(Case::Pascal);
-        let table_module = table_module_name(accessor_name);
-        writeln!(out, "module {alias} = {table_module}");
-    }
-    out.dedent(1);
-    writeln!(out, "}}");
-    writeln!(out, "");
+    let procedure_data: Vec<AliasData> = iter_procedures(module, options.visibility)
+        .map(|p| AliasData {
+            alias: p.accessor_name.deref().to_case(Case::Pascal),
+            target: procedure_module_name(&p.accessor_name),
+        })
+        .collect();
 
-    writeln!(out, "module Reducers = {{");
-    out.indent(1);
-    for reducer in iter_reducers(module, options.visibility) {
-        if !is_reducer_invokable(reducer) {
-            continue;
-        }
-        let alias = reducer.accessor_name.deref().to_case(Case::Pascal);
-        let reducer_module = reducer_module_name(&reducer.name);
-        writeln!(out, "module {alias} = {reducer_module}");
-    }
-    out.dedent(1);
-    writeln!(out, "}}");
-    writeln!(out, "");
+    let table_aliases: Vec<ModuleAliasRes> = table_data
+        .iter()
+        .map(|d| ModuleAliasRes {
+            alias: &d.alias,
+            target: &d.target,
+        })
+        .collect();
 
-    writeln!(out, "module Procedures = {{");
-    out.indent(1);
-    for procedure in iter_procedures(module, options.visibility) {
-        let alias = procedure.accessor_name.deref().to_case(Case::Pascal);
-        let procedure_module = procedure_module_name(&procedure.accessor_name);
-        writeln!(out, "module {alias} = {procedure_module}");
-    }
-    out.dedent(1);
-    writeln!(out, "}}");
+    let reducer_aliases: Vec<ModuleAliasRes> = reducer_data
+        .iter()
+        .map(|d| ModuleAliasRes {
+            alias: &d.alias,
+            target: &d.target,
+        })
+        .collect();
+
+    let procedure_aliases: Vec<ModuleAliasRes> = procedure_data
+        .iter()
+        .map(|d| ModuleAliasRes {
+            alias: &d.alias,
+            target: &d.target,
+        })
+        .collect();
 
     OutputFile {
         filename: "index.res".to_string(),
-        code: output.into_inner(),
+        code: IndexRes {
+            header: AutoGenHeaderRes,
+            table_aliases,
+            reducer_aliases,
+            procedure_aliases,
+        }
+        .to_string(),
     }
 }

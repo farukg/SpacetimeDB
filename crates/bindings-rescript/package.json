@@ -8,11 +8,11 @@
     "main": "src/js_exports.mjs",
     "exports": {
         ".": "./src/js_exports.mjs",
-        "./react": "./src/js_react_exports.mjs"
+        "./react": "./src/js_react_exports.mjs",
+        "./src/*": "./src/*"
     },
     "files": [
         "src",
-        "lib",
         "rescript.json"
     ],
     "scripts": {

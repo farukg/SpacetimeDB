@@ -1,0 +1,1 @@
+  @as("{{self.raw_name}}") {{self.camel_name}}: {{self.type_str}},

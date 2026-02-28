@@ -13,6 +13,7 @@ spacetimedb-primitives.workspace = true
 spacetimedb-schema.workspace = true
 
 anyhow.workspace = true
+boilerplate = "1.1.1"
 convert_case.workspace = true
 itertools.workspace = true
 
