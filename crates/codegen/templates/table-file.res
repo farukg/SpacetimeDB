@@ -7,8 +7,11 @@ type handle
 @send external iter: handle => Iterator.t<t> = "iter"
 
 @send external onInsert: (handle, (StdbSdk.eventCtx, t) => unit) => unit = "onInsert"
+@send external removeOnInsert: (handle, (StdbSdk.eventCtx, t) => unit) => unit = "removeOnInsert"
 @send external onUpdate: (handle, (StdbSdk.eventCtx, t, t) => unit) => unit = "onUpdate"
+@send external removeOnUpdate: (handle, (StdbSdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
 @send external onDelete: (handle, (StdbSdk.eventCtx, t) => unit) => unit = "onDelete"
+@send external removeOnDelete: (handle, (StdbSdk.eventCtx, t) => unit) => unit = "removeOnDelete"
 
 %% if self.has_deleted_at {
 let isAlive = (row: t) => row.deletedAt->Option.isNone

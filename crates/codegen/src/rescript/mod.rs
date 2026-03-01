@@ -12,8 +12,10 @@
 //! - `server_reducers` — `StdbServerReducers.res` generator
 //! - `react` — `StdbReact.res` + `SpacetimeDBProvider.res` generators
 //! - `schema` — `StdbSchema.res` generator (ReScript runtime schema)
+//! - `display` — `StdbDisplay.res` generator (unwrappers + toString helpers)
 
 mod client;
+mod display;
 pub(crate) mod helpers;
 mod index_file;
 mod react;
@@ -199,7 +201,7 @@ impl Lang for ReScript {
     }
 
     /// Returns global files: StdbTypes.res, StdbSchema.res, StdbClient.res, index.res,
-    /// StdbServerReducers.res, StdbReact.res, SpacetimeDBProvider.res.
+    /// StdbServerReducers.res, StdbReact.res, SpacetimeDBProvider.res, StdbDisplay.res.
     fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
         let mut files = vec![
             types::generate_types_file(module),
@@ -207,6 +209,7 @@ impl Lang for ReScript {
             client::generate_client_file(module, options),
             index_file::generate_index_file(module, options),
             server_reducers::generate_server_reducers_file(module, options),
+            display::generate_display_file(module),
         ];
         files.extend(react::generate_react_file(module));
         files

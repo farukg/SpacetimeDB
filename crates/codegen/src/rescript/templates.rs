@@ -253,6 +253,52 @@ pub(super) struct StdbServerReducersRes<'a> {
 }
 
 // ===========================================================================
+// Display Layer 0: Atomic pieces for StdbDisplay.res
+// ===========================================================================
+
+/// A single match arm in an enum toString function.
+/// Renders: `  | Constructor => "Constructor"`
+#[derive(Boilerplate)]
+pub(super) struct DisplayEnumArmRes<'a> {
+    pub constructor: &'a str,
+}
+
+// ===========================================================================
+// Display Layer 1: Structural sections for StdbDisplay.res
+// ===========================================================================
+
+/// A single newtype unwrapper function.
+/// Renders: `let fnName = (v: ModuleName.t) => v.fieldName`
+#[derive(Boilerplate)]
+pub(super) struct DisplayUnwrapperRes<'a> {
+    pub fn_name: &'a str,
+    pub module_name: &'a str,
+    pub field_name: &'a str,
+}
+
+/// A single enum toString function with switch arms.
+#[derive(Boilerplate)]
+pub(super) struct DisplayEnumToStringRes<'a> {
+    pub fn_name: &'a str,
+    pub module_name: &'a str,
+    pub arms: Vec<DisplayEnumArmRes<'a>>,
+}
+
+// ===========================================================================
+// Display Layer 2: File Composition
+// ===========================================================================
+
+/// `StdbDisplay.res` — mechanical unwrappers and toString functions.
+#[derive(Boilerplate)]
+pub(super) struct StdbDisplayRes<'a> {
+    pub header: AutoGenHeaderRes,
+    /// Pre-rendered newtype unwrapper lines.
+    pub unwrappers: &'a str,
+    /// Pre-rendered enum toString functions.
+    pub enum_to_strings: &'a str,
+}
+
+// ===========================================================================
 // Schema Layer 0: Atomic pieces for StdbSchema.res
 // ===========================================================================
 

@@ -812,6 +812,27 @@ ${ty.variants
         }
       };
     } else {
+      // Plain enum fast path: all variants are unit → emit bare strings.
+      // ReScript compiles payloadless variants to bare strings ("Queued"),
+      // so deserialized values must match that shape for === to work.
+      const isPlainEnum = ty.variants.every(
+        v =>
+          getTag(v.algebraicType) === 'Product' &&
+          (v.algebraicType as AlgebraicTypeVariants.Product).value.elements.length === 0
+      );
+      if (isPlainEnum) {
+        const names: string[] = ty.variants.map(v => v.name!);
+        const deserializer: Deserializer<any> = reader => {
+          const tag = reader.readU8();
+          if (tag < names.length) return names[tag];
+          throw new TypeError(
+            `Can't deserialize plain enum; unknown tag ${tag}`
+          );
+        };
+        DESERIALIZERS.set(ty, deserializer);
+        return deserializer;
+      }
+
       let deserializer = DESERIALIZERS.get(ty);
       if (deserializer != null) return deserializer;
       const deserializers: Record<string, Deserializer<any>> = {};

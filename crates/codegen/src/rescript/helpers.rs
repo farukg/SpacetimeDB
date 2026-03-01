@@ -114,7 +114,18 @@ pub fn procedure_module_name(procedure_name: &Identifier) -> String {
 pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRefStyle) -> String {
     match ty {
         AlgebraicTypeUse::Unit | AlgebraicTypeUse::Never => "unit".to_string(),
-        AlgebraicTypeUse::Identity | AlgebraicTypeUse::ConnectionId | AlgebraicTypeUse::Uuid => "string".to_string(),
+        AlgebraicTypeUse::Identity => match style {
+            TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "identity".to_string(),
+            TypeRefStyle::External => "StdbSdk.identity".to_string(),
+        },
+        AlgebraicTypeUse::ConnectionId => match style {
+            TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "connectionId".to_string(),
+            TypeRefStyle::External => "StdbSdk.connectionId".to_string(),
+        },
+        AlgebraicTypeUse::Uuid => match style {
+            TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "uuid".to_string(),
+            TypeRefStyle::External => "StdbSdk.uuid".to_string(),
+        },
         AlgebraicTypeUse::String => "string".to_string(),
         AlgebraicTypeUse::Timestamp => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "timestamp".to_string(),

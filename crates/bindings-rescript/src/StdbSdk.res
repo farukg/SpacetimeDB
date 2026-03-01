@@ -14,6 +14,45 @@ type connection
 type eventCtx
 type reducers
 
+// ─── Identity ───────────────────────────────────────────────────────
+
+type identity // opaque — SDK _Identity class instance
+@send external identityToHex: identity => string = "toHexString"
+@send external identityToString: identity => string = "toString"
+@send external identityIsEqual: (identity, identity) => bool = "isEqual"
+
+module Identity = {
+  @module("spacetimedb") @scope("Identity")
+  external fromString: string => identity = "fromString"
+  let toHex = identityToHex
+  let toString = identityToString
+  let isEqual = identityIsEqual
+}
+
+// ─── ConnectionId ───────────────────────────────────────────────────
+
+type connectionId // opaque — SDK _ConnectionId class instance
+@send external connectionIdToHex: connectionId => string = "toHexString"
+@send external connectionIdIsEqual: (connectionId, connectionId) => bool = "isEqual"
+
+module ConnectionId = {
+  @module("spacetimedb") @scope("ConnectionId")
+  external fromString: string => connectionId = "fromString"
+  let toHex = connectionIdToHex
+  let isEqual = connectionIdIsEqual
+}
+
+// ─── Uuid ───────────────────────────────────────────────────────────
+
+type uuid // opaque — SDK _Uuid class instance
+@send external uuidToString: uuid => string = "toString"
+
+module Uuid = {
+  @module("spacetimedb") @scope("Uuid")
+  external parse: string => uuid = "parse"
+  let toString = uuidToString
+}
+
 // ─── Timestamp ──────────────────────────────────────────────────────
 
 type timestamp // opaque — SDK Timestamp class instance
@@ -42,9 +81,14 @@ type scheduleAt =
 //   U64 → {tag: "U64"}
 //   Product({value: ...}) → {tag: "Product", value: ...}
 
-// ReScript v12 compiles payloadless @tag("tag") variants to bare strings
-// ("U64"), not objects ({tag: "U64"}). The SDK's getTag() helper handles
-// both forms, so primitives can use clean payloadless variants.
+// The SDK dispatches on `ty.tag` via `switch (ty.tag)` in makeDeserializer/
+// makeSerializer. ALL algebraic type values MUST be objects with a `.tag`
+// property — bare strings like "U64" fail because `"U64".tag === undefined`.
+//
+// ReScript v12 compiles payloadless @tag("tag") variants to bare strings,
+// so primitives are constructed as `{tag: "U64"}` objects via external casts
+// in the AlgType module below. Compound types (Product, Sum, Array, Ref)
+// naturally have payloads and compile correctly as `{tag: "Product", value: ...}`.
 
 @tag("tag")
 type rec algebraicType =
@@ -85,23 +129,28 @@ and sumVariant = {
 // These produce the exact JS shapes the SDK expects.
 
 module AlgType = {
-  // Primitives — bare strings "U8", "U64", etc. SDK's getTag() extracts tag.
-  let u8 = U8
-  let u16 = U16
-  let u32 = U32
-  let u64 = U64
-  let i8 = I8
-  let i16 = I16
-  let i32 = I32
-  let i64 = I64
-  let u128 = U128
-  let u256 = U256
-  let i128 = I128
-  let i256 = I256
-  let f32 = F32
-  let f64 = F64
-  let bool_ = Bool
-  let string_ = String_
+  // Primitives — must be {tag: "U8"} objects, NOT bare strings.
+  // ReScript v12 compiles payloadless variants to bare strings which breaks
+  // the SDK's `switch (ty.tag)` dispatch. We use tagged object literals.
+  type tagOnly = {tag: string}
+  external asAlgType: tagOnly => algebraicType = "%identity"
+
+  let u8: algebraicType = asAlgType({tag: "U8"})
+  let u16: algebraicType = asAlgType({tag: "U16"})
+  let u32: algebraicType = asAlgType({tag: "U32"})
+  let u64: algebraicType = asAlgType({tag: "U64"})
+  let i8: algebraicType = asAlgType({tag: "I8"})
+  let i16: algebraicType = asAlgType({tag: "I16"})
+  let i32: algebraicType = asAlgType({tag: "I32"})
+  let i64: algebraicType = asAlgType({tag: "I64"})
+  let u128: algebraicType = asAlgType({tag: "U128"})
+  let u256: algebraicType = asAlgType({tag: "U256"})
+  let i128: algebraicType = asAlgType({tag: "I128"})
+  let i256: algebraicType = asAlgType({tag: "I256"})
+  let f32: algebraicType = asAlgType({tag: "F32"})
+  let f64: algebraicType = asAlgType({tag: "F64"})
+  let bool_: algebraicType = asAlgType({tag: "Bool"})
+  let string_: algebraicType = asAlgType({tag: "String"})
 
   // Compound types
   let product = (elements): algebraicType =>

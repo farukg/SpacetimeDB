@@ -5,10 +5,8 @@
 %% }
     let conn = await C.getConnection()
 %% if self.has_args {
-    let result = await conn->StdbClient.reducers->{{self.module}}.{{self.name_camel}}(args)
+    await conn->StdbClient.reducers->{{self.module}}.{{self.name_camel}}(args)
 %% } else {
-    let result = await conn->StdbClient.reducers->{{self.module}}.{{self.name_camel}}
+    await conn->StdbClient.reducers->{{self.module}}.{{self.name_camel}}
 %% }
-    if syncDelayMs > 0 { await sleep(syncDelayMs) }
-    result
   }
