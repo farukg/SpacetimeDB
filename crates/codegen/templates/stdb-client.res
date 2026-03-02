@@ -13,5 +13,5 @@ type db = {
 }
 
 // DB and reducers access from connection
-@get external db: StdbSdk.connection => db = "db"
-@get external reducers: StdbSdk.connection => StdbSdk.reducers = "reducers"
+@get external db: {{self.sdk_module}}.connection => db = "db"
+@get external reducers: {{self.sdk_module}}.connection => {{self.sdk_module}}.reducers = "reducers"

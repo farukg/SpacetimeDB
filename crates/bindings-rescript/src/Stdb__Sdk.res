@@ -1,4 +1,4 @@
-// StdbSdk.res — Single source of truth for all SpacetimeDB SDK types and bindings.
+// Stdb__Sdk.res — Single source of truth for all SpacetimeDB SDK types and bindings.
 //
 // This file replaces the scattered type declarations across StdbTypes preamble,
 // StdbServerConnection externals, and SpacetimeDBSdk facade.

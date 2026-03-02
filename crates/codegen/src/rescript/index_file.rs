@@ -15,11 +15,11 @@ struct AliasData {
     target: String,
 }
 
-pub(super) fn generate_index_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFile {
+pub(super) fn generate_index_file(module: &ModuleDef, options: &CodegenOptions, root_module: &str) -> OutputFile {
     let table_data: Vec<AliasData> = iter_table_names_and_types(module, options.visibility)
         .map(|(_, accessor_name, _)| AliasData {
             alias: accessor_name.deref().to_case(Case::Pascal),
-            target: table_module_name(accessor_name),
+            target: table_module_name(root_module, accessor_name),
         })
         .collect();
 
@@ -27,14 +27,14 @@ pub(super) fn generate_index_file(module: &ModuleDef, options: &CodegenOptions) 
         .filter(|r| is_reducer_invokable(r))
         .map(|r| AliasData {
             alias: r.accessor_name.deref().to_case(Case::Pascal),
-            target: reducer_module_name(&r.name),
+            target: reducer_module_name(root_module, &r.name),
         })
         .collect();
 
     let procedure_data: Vec<AliasData> = iter_procedures(module, options.visibility)
         .map(|p| AliasData {
             alias: p.accessor_name.deref().to_case(Case::Pascal),
-            target: procedure_module_name(&p.accessor_name),
+            target: procedure_module_name(root_module, &p.accessor_name),
         })
         .collect();
 

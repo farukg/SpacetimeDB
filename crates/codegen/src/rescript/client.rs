@@ -17,13 +17,14 @@ struct DbFieldData {
 }
 
 /// Generates `StdbClient.res`.
-pub(super) fn generate_client_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFile {
+pub(super) fn generate_client_file(module: &ModuleDef, options: &CodegenOptions, root_module: &str) -> OutputFile {
     let mut fields: Vec<DbFieldData> = Vec::new();
+    let sdk_module = format!("{root_module}__Sdk");
 
     for table in iter_tables(module, options.visibility) {
         let accessor = table.accessor_name.deref().to_string();
         let camel = rescript_field_name(accessor.to_case(Case::Camel));
-        let table_module = table_module_name(&table.accessor_name);
+        let table_module = table_module_name(root_module, &table.accessor_name);
         fields.push(DbFieldData {
             accessor,
             camel,
@@ -34,7 +35,7 @@ pub(super) fn generate_client_file(module: &ModuleDef, options: &CodegenOptions)
     for view in iter_views(module) {
         let accessor = view.accessor_name.deref().to_string();
         let camel = rescript_field_name(accessor.to_case(Case::Camel));
-        let view_module = table_module_name(&view.accessor_name);
+        let view_module = table_module_name(root_module, &view.accessor_name);
         fields.push(DbFieldData {
             accessor,
             camel,
@@ -52,10 +53,11 @@ pub(super) fn generate_client_file(module: &ModuleDef, options: &CodegenOptions)
         .collect();
 
     OutputFile {
-        filename: "StdbClient.res".to_string(),
+        filename: format!("{root_module}__Client.res"),
         code: StdbClientRes {
             header: AutoGenHeaderRes,
             db_fields,
+            sdk_module: &sdk_module,
         }
         .to_string(),
     }

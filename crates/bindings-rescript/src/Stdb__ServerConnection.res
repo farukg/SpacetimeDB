@@ -11,7 +11,7 @@
 //   module ServerConn = StdbServerConnection.Make(Config)
 //   let conn = await ServerConn.getConnection()
 
-open StdbSdk
+open Stdb__Sdk
 
 module type Config = {
   let remoteModule: remoteModule

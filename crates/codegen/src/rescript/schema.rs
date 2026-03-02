@@ -34,8 +34,9 @@ use spacetimedb_schema::type_for_generate::AlgebraicTypeDef;
 use std::collections::HashMap;
 use std::ops::Deref;
 
-pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFile {
+pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions, root_module: &str) -> OutputFile {
     let cli_version = spacetimedb_lib_version();
+    let sdk_module = format!("{root_module}__Sdk");
 
     // ── Named type bindings (topologically sorted — dependencies first) ──
     let types: Vec<_> = iter_types(module).collect();
@@ -213,9 +214,10 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions)
 
     // ── Compose the file ─────────────────────────────────────────────
     OutputFile {
-        filename: "StdbSchema.res".to_string(),
+        filename: format!("{root_module}__Schema.res"),
         code: StdbSchemaRes {
             header: AutoGenHeaderRes,
+            sdk_module: &sdk_module,
             cli_version: &cli_version,
             type_bindings: type_bindings_str.trim_end(),
             table_entries,

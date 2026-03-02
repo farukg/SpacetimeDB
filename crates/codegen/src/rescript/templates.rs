@@ -117,6 +117,19 @@ pub(super) struct ModuleTypeAliasRes<'a> {
     pub type_alias: &'a str,
 }
 
+/// Newtype helper functions (make/value/toKey/equal) for single-field products.
+/// Emitted inside the module wrapper alongside the type declaration.
+#[derive(Boilerplate)]
+pub(super) struct NewtypeHelpersRes<'a> {
+    /// The camelCase field name (e.g., "id").
+    pub field_camel: &'a str,
+    /// The ReScript type of the inner field (e.g., "bigint", "string").
+    pub inner_type: &'a str,
+    /// Pre-rendered `toKey` expression, or None to omit `toKey`.
+    /// e.g., `Some("BigInt.toString(v.id)")` for bigint fields.
+    pub to_key_expr: Option<&'a str>,
+}
+
 /// PK index section for a table file.
 #[derive(Boilerplate)]
 pub(super) struct PkIndexSectionRes<'a> {
@@ -168,15 +181,18 @@ pub(super) struct ServerReducerValueFieldRes<'a> {
 #[derive(Boilerplate)]
 pub(super) struct StdbReactRes;
 
-/// `SpacetimeDBProvider.res` — entirely static React component binding.
+/// `SpacetimeDBProvider.res` — React component binding, sdk_module-parameterised.
 #[derive(Boilerplate)]
-pub(super) struct SpacetimedbProviderRes;
+pub(super) struct SpacetimedbProviderRes<'a> {
+    pub sdk_module: &'a str,
+}
 
 /// `StdbClient.res` — db record aggregating all tables + connection accessors.
 #[derive(Boilerplate)]
 pub(super) struct StdbClientRes<'a> {
     pub header: AutoGenHeaderRes,
     pub db_fields: Vec<DbFieldRes<'a>>,
+    pub sdk_module: &'a str,
 }
 
 /// `index.res` — module re-exports.
@@ -194,11 +210,16 @@ pub(super) struct TableFileRes<'a> {
     pub header: AutoGenHeaderRes,
     /// Pre-rendered row record type block.
     pub row_type: &'a str,
-    pub has_deleted_at: bool,
     /// Pre-rendered PK index section, or empty string if no PK.
     pub pk_section: &'a str,
     pub table_name: &'a str,
-    pub react_hooks: TableReactHookSectionRes<'a>,
+    /// Pre-rendered typed event union + subscribe (always present).
+    pub event_section: &'a str,
+    /// Pre-rendered observer functor section, or empty string when async_style = Promise.
+    pub observer_section: &'a str,
+    /// Pre-rendered React hooks section, or empty string when async_style = Observer.
+    pub react_hooks: &'a str,
+    pub sdk_module: &'a str,
 }
 
 /// Per-reducer file (with args): `Stdb*Reducer.res`.
@@ -212,7 +233,11 @@ pub(super) struct ReducerWithArgsFileRes<'a> {
     pub call_params: &'a str,
     /// Pre-rendered record construction fields for `let call` body.
     pub call_body_fields: &'a str,
-    pub react_hooks: ReducerReactHookSectionRes<'a>,
+    /// Pre-rendered React hooks section, or empty string when async_style = Observer.
+    pub react_hooks: &'a str,
+    /// Pre-rendered Make functor section, or empty string when async_style = Promise.
+    pub make_functor: &'a str,
+    pub sdk_module: &'a str,
 }
 
 /// Per-reducer file (no args): `Stdb*Reducer.res`.
@@ -220,7 +245,11 @@ pub(super) struct ReducerWithArgsFileRes<'a> {
 pub(super) struct ReducerNoArgsFileRes<'a> {
     pub header: AutoGenHeaderRes,
     pub accessor: &'a str,
-    pub react_hooks: ReducerReactHookSectionRes<'a>,
+    /// Pre-rendered React hooks section, or empty string when async_style = Observer.
+    pub react_hooks: &'a str,
+    /// Pre-rendered Make functor section, or empty string when async_style = Promise.
+    pub make_functor: &'a str,
+    pub sdk_module: &'a str,
 }
 
 /// Per-procedure file: `Stdb*Procedure.res`.
@@ -236,7 +265,9 @@ pub(super) struct ProcedureFileRes<'a> {
 
 /// `StdbTypes.res` preamble — opaque SDK types (emitted before per-type modules).
 #[derive(Boilerplate)]
-pub(super) struct TypesPreambleRes;
+pub(super) struct TypesPreambleRes<'a> {
+    pub sdk_module: &'a str,
+}
 
 /// `StdbTypes.res` postamble — connectionBuilder type (emitted after per-type modules).
 #[derive(Boilerplate)]
@@ -250,6 +281,7 @@ pub(super) struct StdbServerReducersRes<'a> {
     pub reducer_type_fields: Vec<ServerReducerTypeFieldRes<'a>>,
     pub reducer_value_fields: Vec<ServerReducerValueFieldRes<'a>>,
     pub has_reducers: bool,
+    pub sdk_module: &'a str,
 }
 
 // ===========================================================================
@@ -296,6 +328,7 @@ pub(super) struct StdbDisplayRes<'a> {
     pub unwrappers: &'a str,
     /// Pre-rendered enum toString functions.
     pub enum_to_strings: &'a str,
+    pub sdk_module: &'a str,
 }
 
 // ===========================================================================
@@ -401,7 +434,7 @@ pub(super) struct SchemaProcedureEntryRes<'a> {
 
 /// `StdbSchema.res` — pure ReScript runtime schema (replaces StdbSchema.mjs).
 ///
-/// Constructs `remoteModule` directly using `StdbSdk` types and `AlgType.*` constructors.
+/// Constructs `remoteModule` directly using `sdk_module` types and `AlgType.*` constructors.
 /// No SDK builder functions — just record literals.
 #[derive(Boilerplate)]
 pub(super) struct StdbSchemaRes<'a> {
@@ -414,4 +447,40 @@ pub(super) struct StdbSchemaRes<'a> {
     pub procedure_entries: Vec<SchemaProcedureEntryRes<'a>>,
     /// Comma-separated list of all table accessor names for allTableNames.
     pub all_table_names: Vec<&'a str>,
+    pub sdk_module: &'a str,
+}
+
+// ===========================================================================
+// Async/Observer Layer: Stdb__Async.res and functor sections
+// ===========================================================================
+
+/// `Stdb__Async.res` — EFFECT_RUNTIME + OBSERVER module type contracts.
+/// Entirely static — no schema data.
+#[derive(Boilerplate)]
+pub(super) struct StdbAsyncRes;
+
+/// Typed event union section for table files.
+/// Emitted unconditionally (regardless of async_style).
+/// Contains: type event, let subscribe
+#[derive(Boilerplate)]
+pub(super) struct TableEventSectionRes<'a> {
+    pub sdk_module: &'a str,
+}
+
+/// Observer functor section for table files.
+/// Emitted when async_style ∈ {Observer, All}.
+/// Contains: module MakeStream with observe + observeWithCtx
+#[derive(Boilerplate)]
+pub(super) struct TableObserverSectionRes<'a> {
+    pub sdk_module: &'a str,
+}
+
+/// Make functor section for reducer files (with or without args).
+/// Emitted when async_style ∈ {Observer, All}.
+/// Contains: module Make = (E: Stdb__Async.EFFECT_RUNTIME) => { let call ... }
+#[derive(Boilerplate)]
+pub(super) struct ReducerMakeFunctorRes<'a> {
+    pub accessor: &'a str,
+    pub has_args: bool,
+    pub sdk_module: &'a str,
 }

@@ -8,7 +8,7 @@
 //   })
 //   let result = await ServerReducers.serverReducers.addPlayer({name: "Alice"})
 
-open StdbSdk
+open {{self.sdk_module}}
 
 module type Config = {
   let getConnection: unit => promise<connection>

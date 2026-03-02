@@ -19,9 +19,10 @@ use spacetimedb_schema::def::ModuleDef;
 use spacetimedb_schema::type_for_generate::AlgebraicTypeDef;
 use std::ops::Deref;
 
-pub(super) fn generate_display_file(module: &ModuleDef) -> OutputFile {
+pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> OutputFile {
     let types: Vec<_> = iter_types(module).collect();
     let typespace = module.typespace_for_generate();
+    let sdk_module = format!("{root_module}__Sdk");
 
     // ── Newtype unwrappers ───────────────────────────────────────────────────
     //
@@ -113,10 +114,11 @@ pub(super) fn generate_display_file(module: &ModuleDef) -> OutputFile {
         header: AutoGenHeaderRes,
         unwrappers: &unwrappers,
         enum_to_strings: &enum_to_strings,
+        sdk_module: &sdk_module,
     };
 
     OutputFile {
-        filename: "StdbDisplay.res".to_string(),
+        filename: format!("{root_module}__Display.res"),
         code: display.to_string(),
     }
 }

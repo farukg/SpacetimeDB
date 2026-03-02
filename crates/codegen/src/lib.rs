@@ -18,15 +18,30 @@ pub use util::private_table_names;
 pub use util::CodegenVisibility;
 pub use util::AUTO_GENERATED_PREFIX;
 
+/// Controls what async/reactive API surface the ReScript codegen emits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AsyncStyle {
+    /// React hooks + promise<unit>. Zero new deps. Current behavior.
+    Promise,
+    /// Module functor API only. No React hooks. Consumer brings their own
+    /// effect/stream library. Emits Stdb__Async.res.
+    Observer,
+    /// Both React hooks AND observer functors. Default for new projects.
+    #[default]
+    All,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenOptions {
     pub visibility: CodegenVisibility,
+    pub async_style: AsyncStyle,
 }
 
 impl Default for CodegenOptions {
     fn default() -> Self {
         Self {
             visibility: CodegenVisibility::OnlyPublic,
+            async_style: AsyncStyle::default(),
         }
     }
 }

@@ -1,10 +1,10 @@
 {{self.header}}
 
 // StdbSchema.res — pure ReScript runtime schema.
-// Constructs remoteModule directly using StdbSdk types.
+// Constructs remoteModule directly using {{self.sdk_module}} types.
 // SpacetimeDB CLI Version: {{self.cli_version}}
 
-open StdbSdk
+open {{self.sdk_module}}
 
 // ─── Named type algebraicType bindings ──────────────────────────────
 

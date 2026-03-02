@@ -1,4 +1,4 @@
-use spacetimedb_codegen::{generate, CodegenOptions, Csharp, ReScript, Rust, TypeScript};
+use spacetimedb_codegen::{generate, AsyncStyle, CodegenOptions, Csharp, ReScript, Rust, TypeScript};
 use spacetimedb_data_structures::map::HashMap;
 use spacetimedb_schema::def::ModuleDef;
 use spacetimedb_testing::modules::{CompilationMode, CompiledModule};
@@ -38,5 +38,5 @@ declare_tests! {
     test_codegen_csharp => Csharp { namespace: "SpacetimeDB" },
     test_codegen_typescript => TypeScript,
     test_codegen_rust => Rust,
-    test_codegen_rescript => ReScript,
+    test_codegen_rescript => ReScript { async_style: AsyncStyle::All, root_module: "Stdb".to_string() },
 }

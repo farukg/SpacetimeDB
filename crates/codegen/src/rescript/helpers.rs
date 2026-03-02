@@ -91,16 +91,25 @@ pub fn rescript_constructor_name(name: &str) -> String {
     }
 }
 
-pub fn table_module_name(table_name: &Identifier) -> String {
-    format!("Stdb{}Table", table_name.deref().to_case(Case::Pascal))
+pub fn table_module_name(root_module: &str, table_name: &Identifier) -> String {
+    format!(
+        "{root_module}__{name}Table",
+        name = table_name.deref().to_case(Case::Pascal)
+    )
 }
 
-pub fn reducer_module_name(reducer_name: &spacetimedb_schema::reducer_name::ReducerName) -> String {
-    format!("Stdb{}Reducer", reducer_name.deref().to_case(Case::Pascal))
+pub fn reducer_module_name(root_module: &str, reducer_name: &spacetimedb_schema::reducer_name::ReducerName) -> String {
+    format!(
+        "{root_module}__{name}Reducer",
+        name = reducer_name.deref().to_case(Case::Pascal)
+    )
 }
 
-pub fn procedure_module_name(procedure_name: &Identifier) -> String {
-    format!("Stdb{}Procedure", procedure_name.deref().to_case(Case::Pascal))
+pub fn procedure_module_name(root_module: &str, procedure_name: &Identifier) -> String {
+    format!(
+        "{root_module}__{name}Procedure",
+        name = procedure_name.deref().to_case(Case::Pascal)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -111,41 +120,41 @@ pub fn procedure_module_name(procedure_name: &Identifier) -> String {
 ///
 /// This is the pre-render boundary: recursive type dispatch must happen in Rust,
 /// but the result is a plain string that boilerplate templates embed via `{{...}}`.
-pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRefStyle) -> String {
+pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRefStyle, root_module: &str) -> String {
     match ty {
         AlgebraicTypeUse::Unit | AlgebraicTypeUse::Never => "unit".to_string(),
         AlgebraicTypeUse::Identity => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "identity".to_string(),
-            TypeRefStyle::External => "StdbSdk.identity".to_string(),
+            TypeRefStyle::External => format!("{root_module}__Sdk.identity"),
         },
         AlgebraicTypeUse::ConnectionId => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "connectionId".to_string(),
-            TypeRefStyle::External => "StdbSdk.connectionId".to_string(),
+            TypeRefStyle::External => format!("{root_module}__Sdk.connectionId"),
         },
         AlgebraicTypeUse::Uuid => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "uuid".to_string(),
-            TypeRefStyle::External => "StdbSdk.uuid".to_string(),
+            TypeRefStyle::External => format!("{root_module}__Sdk.uuid"),
         },
         AlgebraicTypeUse::String => "string".to_string(),
         AlgebraicTypeUse::Timestamp => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "timestamp".to_string(),
-            TypeRefStyle::External => "StdbSdk.timestamp".to_string(),
+            TypeRefStyle::External => format!("{root_module}__Sdk.timestamp"),
         },
         AlgebraicTypeUse::TimeDuration => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "timeDuration".to_string(),
-            TypeRefStyle::External => "StdbSdk.timeDuration".to_string(),
+            TypeRefStyle::External => format!("{root_module}__Sdk.timeDuration"),
         },
         AlgebraicTypeUse::ScheduleAt => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "scheduleAt".to_string(),
-            TypeRefStyle::External => "StdbSdk.scheduleAt".to_string(),
+            TypeRefStyle::External => format!("{root_module}__Sdk.scheduleAt"),
         },
         AlgebraicTypeUse::Option(inner) => {
-            let inner_str = render_res_type(module, inner, style);
+            let inner_str = render_res_type(module, inner, style, root_module);
             format!("option<{inner_str}>")
         }
         AlgebraicTypeUse::Result { ok_ty, err_ty } => {
-            let ok_str = render_res_type(module, ok_ty, style);
-            let err_str = render_res_type(module, err_ty, style);
+            let ok_str = render_res_type(module, ok_ty, style, root_module);
+            let err_str = render_res_type(module, err_ty, style, root_module);
             format!("result<{ok_str}, {err_str}>")
         }
         AlgebraicTypeUse::Primitive(prim) => match prim {
@@ -165,7 +174,7 @@ pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRef
             PrimitiveType::F32 | PrimitiveType::F64 => "float".to_string(),
         },
         AlgebraicTypeUse::Array(inner) => {
-            let inner_str = render_res_type(module, inner, style);
+            let inner_str = render_res_type(module, inner, style, root_module);
             format!("array<{inner_str}>")
         }
         AlgebraicTypeUse::Ref(reference) => {
@@ -174,7 +183,7 @@ pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRef
             match style {
                 TypeRefStyle::InTypesFile => format!("{module_name}.t"),
                 TypeRefStyle::InRecursiveGroup => rescript_type_name(pascal_name),
-                TypeRefStyle::External => format!("StdbTypes.{module_name}.t"),
+                TypeRefStyle::External => format!("{root_module}__Types.{module_name}.t"),
             }
         }
     }
@@ -254,6 +263,49 @@ pub fn schema_type_binding_name(pascal_name: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Newtype helpers (A2)
+// ---------------------------------------------------------------------------
+
+/// Compute the `toKey` expression for a single-field newtype.
+///
+/// Returns `Some("BigInt.toString(v.field)")` for bigint fields, etc.
+/// Returns `None` for types where a `toKey` function doesn't make sense
+/// (option, result, array, scheduleAt, Ref to another product type, etc.).
+pub fn render_to_key_expr(ty: &AlgebraicTypeUse, field_camel: &str) -> Option<String> {
+    match ty {
+        AlgebraicTypeUse::Primitive(prim) => match prim {
+            PrimitiveType::I64
+            | PrimitiveType::U64
+            | PrimitiveType::I128
+            | PrimitiveType::U128
+            | PrimitiveType::I256
+            | PrimitiveType::U256 => Some(format!("BigInt.toString(v.{field_camel})")),
+            PrimitiveType::I8
+            | PrimitiveType::U8
+            | PrimitiveType::I16
+            | PrimitiveType::U16
+            | PrimitiveType::I32
+            | PrimitiveType::U32 => Some(format!("Int.toString(v.{field_camel})")),
+            PrimitiveType::F32 | PrimitiveType::F64 => Some(format!("Float.toString(v.{field_camel})")),
+            PrimitiveType::Bool => Some(format!("string_of_bool(v.{field_camel})")),
+        },
+        AlgebraicTypeUse::String | AlgebraicTypeUse::Identity | AlgebraicTypeUse::Uuid => {
+            Some(format!("v.{field_camel}"))
+        }
+        AlgebraicTypeUse::ConnectionId
+        | AlgebraicTypeUse::Timestamp
+        | AlgebraicTypeUse::TimeDuration
+        | AlgebraicTypeUse::ScheduleAt
+        | AlgebraicTypeUse::Option(_)
+        | AlgebraicTypeUse::Result { .. }
+        | AlgebraicTypeUse::Array(_)
+        | AlgebraicTypeUse::Ref(_)
+        | AlgebraicTypeUse::Unit
+        | AlgebraicTypeUse::Never => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Record / Sum / Enum type rendering (boilerplate-based, return String)
 // ---------------------------------------------------------------------------
 
@@ -270,8 +322,9 @@ pub fn render_record_type(
     name: &str,
     elements: &[(Identifier, AlgebraicTypeUse)],
     style: TypeRefStyle,
+    root_module: &str,
 ) -> String {
-    render_record_type_kw(module, "type", name, elements, style)
+    render_record_type_kw(module, "type", name, elements, style, root_module)
 }
 
 /// Render `<keyword> <name> = { ... }` where keyword is `type`, `type rec`, or `and`.
@@ -283,6 +336,7 @@ pub fn render_record_type_kw(
     name: &str,
     elements: &[(Identifier, AlgebraicTypeUse)],
     style: TypeRefStyle,
+    root_module: &str,
 ) -> String {
     if elements.is_empty() {
         return UnitTypeDeclRes { keyword, name }.to_string();
@@ -294,7 +348,7 @@ pub fn render_record_type_kw(
         .map(|(field, ty)| {
             let raw = field.deref().to_string();
             let camel = rescript_field_name(raw.to_case(Case::Camel));
-            let type_str = render_res_type(module, ty, style);
+            let type_str = render_res_type(module, ty, style, root_module);
             RecordFieldData { raw, camel, type_str }
         })
         .collect();
@@ -326,6 +380,7 @@ pub fn render_sum_type(
     name: &str,
     variants: &[(Identifier, AlgebraicTypeUse)],
     style: TypeRefStyle,
+    root_module: &str,
 ) -> String {
     let variant_data: Vec<SumVariantData> = variants
         .iter()
@@ -334,7 +389,7 @@ pub fn render_sum_type(
             let payload = if matches!(variant_type, AlgebraicTypeUse::Unit) {
                 String::new()
             } else {
-                render_res_type(module, variant_type, style)
+                render_res_type(module, variant_type, style, root_module)
             };
             SumVariantData { constructor, payload }
         })

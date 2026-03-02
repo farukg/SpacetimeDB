@@ -19,12 +19,17 @@ struct ReducerData {
     has_args: bool,
 }
 
-pub(super) fn generate_server_reducers_file(module: &ModuleDef, options: &CodegenOptions) -> OutputFile {
+pub(super) fn generate_server_reducers_file(
+    module: &ModuleDef,
+    options: &CodegenOptions,
+    root_module: &str,
+) -> OutputFile {
+    let sdk_module = format!("{root_module}__Sdk");
     let reducer_data: Vec<ReducerData> = iter_reducers(module, options.visibility)
         .filter(|r| is_reducer_invokable(r))
         .map(|r| ReducerData {
             name_camel: rescript_field_name(r.accessor_name.deref().to_case(Case::Camel)),
-            module: reducer_module_name(&r.name),
+            module: reducer_module_name(root_module, &r.name),
             has_args: !r.params_for_generate.elements.is_empty(),
         })
         .collect();
@@ -57,13 +62,14 @@ pub(super) fn generate_server_reducers_file(module: &ModuleDef, options: &Codege
         .collect();
 
     OutputFile {
-        filename: "StdbServerReducers.res".to_string(),
+        filename: format!("{root_module}__ServerReducers.res"),
         code: StdbServerReducersRes {
             header: AutoGenHeaderRes,
             reducer_wrappers,
             reducer_type_fields,
             reducer_value_fields,
             has_reducers,
+            sdk_module: &sdk_module,
         }
         .to_string(),
     }

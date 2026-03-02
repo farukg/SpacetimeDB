@@ -6,8 +6,8 @@ use clap::Arg;
 use clap::ArgAction::{Set, SetTrue};
 use fs_err as fs;
 use spacetimedb_codegen::{
-    generate, private_table_names, CodegenOptions, CodegenVisibility, Csharp, Lang, OutputFile, ReScript, Rust,
-    TypeScript, UnrealCpp, AUTO_GENERATED_PREFIX,
+    generate, private_table_names, AsyncStyle, CodegenOptions, CodegenVisibility, Csharp, Lang, OutputFile, ReScript,
+    Rust, TypeScript, UnrealCpp, AUTO_GENERATED_PREFIX,
 };
 use spacetimedb_lib::de::serde::DeserializeWrapper;
 use spacetimedb_lib::{sats, RawModuleDef};
@@ -520,7 +520,10 @@ pub async fn run_prepared_generate_configs(
                 &unreal_cpp_lang as &dyn Lang
             }
             Language::Rust => &Rust,
-            Language::ReScript => &ReScript,
+            Language::ReScript => &ReScript {
+                async_style: AsyncStyle::All,
+                root_module: "Stdb".to_string(),
+            },
             Language::TypeScript => &TypeScript,
         };
 

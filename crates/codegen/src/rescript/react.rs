@@ -8,15 +8,19 @@ use super::templates::{SpacetimedbProviderRes, StdbReactRes};
 use crate::OutputFile;
 use spacetimedb_schema::def::ModuleDef;
 
-pub(super) fn generate_react_file(_module: &ModuleDef) -> Vec<OutputFile> {
+pub(super) fn generate_react_file(_module: &ModuleDef, root_module: &str) -> Vec<OutputFile> {
+    let sdk_module = format!("{root_module}__Sdk");
     vec![
         OutputFile {
-            filename: "StdbReact.res".to_string(),
+            filename: format!("{root_module}__React.res"),
             code: StdbReactRes.to_string(),
         },
         OutputFile {
-            filename: "SpacetimeDBProvider.res".to_string(),
-            code: SpacetimedbProviderRes.to_string(),
+            filename: format!("{root_module}__Provider.res"),
+            code: SpacetimedbProviderRes {
+                sdk_module: &sdk_module,
+            }
+            .to_string(),
         },
     ]
 }

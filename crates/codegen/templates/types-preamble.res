@@ -1,1 +1,1 @@
-open StdbSdk
+open {{self.sdk_module}}
