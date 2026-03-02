@@ -16,6 +16,15 @@ export function useTable(query, callbacks) {
 }
 
 /**
+ * useTableWith — same as useTable but with explicit callbacks.
+ * Upstream returns [rows, isReady] tuple, we extract only rows.
+ */
+export function useTableWith(query, callbacks) {
+  const [rows] = upstreamUseTable(query, callbacks);
+  return rows;
+}
+
+/**
  * useTableState — wraps useTable and surfaces the isReady flag as a
  * ReScript variant: Loading | Ready(array<'row>).
  *
