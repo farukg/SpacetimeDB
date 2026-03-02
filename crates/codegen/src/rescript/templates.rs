@@ -139,10 +139,10 @@ pub(super) struct PkIndexSectionRes<'a> {
 }
 
 /// React table hook section (appears in every table file).
+/// `react_module` is hardcoded as `React` in the template (via gateway open).
 #[derive(Boilerplate)]
 pub(super) struct TableReactHookSectionRes<'a> {
     pub accessor: &'a str,
-    pub react_module: &'a str,
     pub has_pk: bool,
     pub pk_type: &'a str,
     pub pk_field_camel: &'a str,
@@ -151,11 +151,11 @@ pub(super) struct TableReactHookSectionRes<'a> {
 }
 
 /// React reducer hook section (appears in every reducer file).
+/// `react_module` is hardcoded as `React` in the template (via gateway open).
 #[derive(Boilerplate)]
 pub(super) struct ReducerReactHookSectionRes<'a> {
     pub params_type: &'a str,
     pub camel_accessor: &'a str,
-    pub react_module: &'a str,
     pub schema_module: &'a str,
 }
 
@@ -229,7 +229,6 @@ pub(super) struct TableFileRes<'a> {
     /// Pre-rendered display projection section, or empty string if unit type.
     pub display_section: &'a str,
     pub root_module: &'a str,
-    pub sdk_module: &'a str,
 }
 
 /// Per-reducer file (with args): `Stdb*Reducer.res`.
@@ -244,7 +243,6 @@ pub(super) struct ReducerWithArgsFileRes<'a> {
     /// Pre-rendered Make functor section, or empty string when async_style = Promise.
     pub make_functor: &'a str,
     pub root_module: &'a str,
-    pub sdk_module: &'a str,
 }
 
 /// Per-reducer file (no args): `Stdb*Reducer.res`.
@@ -257,7 +255,6 @@ pub(super) struct ReducerNoArgsFileRes<'a> {
     /// Pre-rendered Make functor section, or empty string when async_style = Promise.
     pub make_functor: &'a str,
     pub root_module: &'a str,
-    pub sdk_module: &'a str,
 }
 
 /// Per-reducer server file: `Stdb__Reducers__X__Server.res`.
@@ -266,9 +263,9 @@ pub(super) struct ReducerNoArgsFileRes<'a> {
 pub(super) struct ReducerServerFileRes<'a> {
     pub header: AutoGenHeaderRes,
     pub has_args: bool,
+    /// Dotted module path for `open` (e.g. `Reducers.Foo`), not double-underscore.
     pub reducer_module: &'a str,
     pub root_module: &'a str,
-    pub sdk_module: &'a str,
     pub accessor: &'a str,
 }
 
@@ -302,7 +299,6 @@ pub(super) struct StdbServerReducersRes<'a> {
     pub reducer_value_fields: Vec<ServerReducerValueFieldRes<'a>>,
     pub has_reducers: bool,
     pub root_module: &'a str,
-    pub sdk_module: &'a str,
 }
 
 // ===========================================================================
@@ -367,7 +363,6 @@ pub(super) struct StdbDisplayRes<'a> {
     /// Pre-rendered enum fromString functions.
     pub enum_from_strings: &'a str,
     pub root_module: &'a str,
-    pub sdk_module: &'a str,
 }
 
 // ===========================================================================
@@ -502,27 +497,21 @@ pub(super) struct StdbAsyncRes;
 /// Emitted unconditionally (regardless of async_style).
 /// Contains: type event, let subscribe
 #[derive(Boilerplate)]
-pub(super) struct TableEventSectionRes<'a> {
-    pub root_module: &'a str,
-}
+pub(super) struct TableEventSectionRes;
 
 /// Observer functor section for table files.
 /// Emitted when async_style ∈ {Observer, All}.
 /// Contains: module MakeStream with observe + observeWithCtx
 #[derive(Boilerplate)]
-pub(super) struct TableObserverSectionRes<'a> {
-    pub root_module: &'a str,
-}
+pub(super) struct TableObserverSectionRes;
 
 /// Make functor section for reducer files (with or without args).
 /// Emitted when async_style ∈ {Observer, All}.
-/// Contains: module Make = (E: Stdb__Async.EFFECT_RUNTIME) => { let call ... }
+/// Contains: module Make = (E: Async.EFFECT_RUNTIME) => { let call ... }
 #[derive(Boilerplate)]
 pub(super) struct ReducerMakeFunctorRes<'a> {
     pub accessor: &'a str,
     pub has_args: bool,
-    pub root_module: &'a str,
-    pub sdk_module: &'a str,
 }
 
 // ===========================================================================

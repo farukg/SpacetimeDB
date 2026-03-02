@@ -84,7 +84,8 @@ pub(super) fn render_display_section(
     }
 
     let typespace = module.typespace_for_generate();
-    let display_module = format!("{root_module}__Display");
+    // Bare module name — the calling file does `open {root_module}` which brings Display into scope.
+    let display_module = "Display";
 
     let mut display_fields: Vec<DisplayFieldData> = Vec::new();
 
@@ -221,7 +222,7 @@ fn classify_field(
                 convert_expr: format!("{row_access}->BigInt.toFloat"),
             },
             _ => FieldProjection::Passthrough {
-                type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::External, root_module),
+                type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::ViaGateway, root_module),
             },
         },
 
@@ -267,7 +268,7 @@ fn classify_field(
                     type_str: format!("option<{enum_type}>"),
                 },
                 _ => FieldProjection::Passthrough {
-                    type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::External, root_module),
+                    type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::ViaGateway, root_module),
                 },
             }
         }
@@ -276,14 +277,15 @@ fn classify_field(
         AlgebraicTypeUse::Ref(reference) => {
             let pascal_name = type_ref_name(module, *reference);
             let module_name = rescript_module_name(&pascal_name);
-            let types_module = format!("{root_module}__Types");
+            // Bare module name — the calling file does `open {root_module}` which brings Types into scope.
+            let types_module = "Types";
 
             match &typespace[*reference] {
                 AlgebraicTypeDef::Product(product) if product.elements.len() == 1 => {
                     // Single-field product = newtype
                     let (_inner_field, inner_ty) = &product.elements[0];
                     let inner_type_str =
-                        super::helpers::render_res_type(module, inner_ty, TypeRefStyle::External, root_module);
+                        super::helpers::render_res_type(module, inner_ty, TypeRefStyle::ViaGateway, root_module);
 
                     // Check if toKey exists for this newtype
                     let has_to_key = super::helpers::render_to_key_expr(inner_ty, "unused").is_some();
@@ -316,7 +318,7 @@ fn classify_field(
                 _ => {
                     // Multi-field product or tagged sum → pass through
                     FieldProjection::Passthrough {
-                        type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::External, root_module),
+                        type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::ViaGateway, root_module),
                     }
                 }
             }
@@ -324,7 +326,7 @@ fn classify_field(
 
         // Everything else → pass through
         _ => FieldProjection::Passthrough {
-            type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::External, root_module),
+            type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::ViaGateway, root_module),
         },
     }
 }

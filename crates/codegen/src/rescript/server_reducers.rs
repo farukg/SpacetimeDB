@@ -1,6 +1,6 @@
 //! Server-side reducer wrappers codegen — generates `StdbServerReducers.res`.
 
-use super::helpers::{reducer_module_name, rescript_field_name};
+use super::helpers::rescript_field_name;
 use super::templates::{
     AutoGenHeaderRes, ServerReducerTypeFieldRes, ServerReducerValueFieldRes, ServerReducerWrapperRes,
     StdbServerReducersRes,
@@ -24,12 +24,12 @@ pub(super) fn generate_server_reducers_file(
     options: &CodegenOptions,
     root_module: &str,
 ) -> OutputFile {
-    let sdk_module = format!("{root_module}__Sdk");
     let reducer_data: Vec<ReducerData> = iter_reducers(module, options.visibility)
         .filter(|r| is_reducer_invokable(r))
         .map(|r| ReducerData {
             name_camel: rescript_field_name(r.accessor_name.deref().to_case(Case::Camel)),
-            module: reducer_module_name(root_module, &r.name),
+            // Dotted path — the template does `open {root_module}` so `Reducers.Foo` resolves.
+            module: format!("Reducers.{}", r.name.deref().to_case(Case::Pascal)),
             has_args: !r.params_for_generate.elements.is_empty(),
         })
         .collect();
@@ -70,7 +70,6 @@ pub(super) fn generate_server_reducers_file(
             reducer_value_fields,
             has_reducers,
             root_module,
-            sdk_module: &sdk_module,
         }
         .to_string(),
     }

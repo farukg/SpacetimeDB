@@ -25,8 +25,9 @@ pub enum TypeRefStyle {
     InTypesFile,
     /// Inside a `module Recursive_N = { ... }` block: bare name (e.g., `expr`)
     InRecursiveGroup,
-    /// From table/reducer files (outside StdbTypes.res): `StdbTypes.AccountId.t`
-    External,
+    /// From per-entity files that `open {root_module}`: bare `Sdk.identity`, `Types.Foo.t`
+    /// The gateway open brings all submodule aliases into scope.
+    ViaGateway,
 }
 
 // ---------------------------------------------------------------------------
@@ -125,28 +126,28 @@ pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRef
         AlgebraicTypeUse::Unit | AlgebraicTypeUse::Never => "unit".to_string(),
         AlgebraicTypeUse::Identity => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "identity".to_string(),
-            TypeRefStyle::External => format!("{root_module}__Sdk.identity"),
+            TypeRefStyle::ViaGateway => "Sdk.identity".to_string(),
         },
         AlgebraicTypeUse::ConnectionId => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "connectionId".to_string(),
-            TypeRefStyle::External => format!("{root_module}__Sdk.connectionId"),
+            TypeRefStyle::ViaGateway => "Sdk.connectionId".to_string(),
         },
         AlgebraicTypeUse::Uuid => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "uuid".to_string(),
-            TypeRefStyle::External => format!("{root_module}__Sdk.uuid"),
+            TypeRefStyle::ViaGateway => "Sdk.uuid".to_string(),
         },
         AlgebraicTypeUse::String => "string".to_string(),
         AlgebraicTypeUse::Timestamp => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "timestamp".to_string(),
-            TypeRefStyle::External => format!("{root_module}__Sdk.timestamp"),
+            TypeRefStyle::ViaGateway => "Sdk.timestamp".to_string(),
         },
         AlgebraicTypeUse::TimeDuration => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "timeDuration".to_string(),
-            TypeRefStyle::External => format!("{root_module}__Sdk.timeDuration"),
+            TypeRefStyle::ViaGateway => "Sdk.timeDuration".to_string(),
         },
         AlgebraicTypeUse::ScheduleAt => match style {
             TypeRefStyle::InTypesFile | TypeRefStyle::InRecursiveGroup => "scheduleAt".to_string(),
-            TypeRefStyle::External => format!("{root_module}__Sdk.scheduleAt"),
+            TypeRefStyle::ViaGateway => "Sdk.scheduleAt".to_string(),
         },
         AlgebraicTypeUse::Option(inner) => {
             let inner_str = render_res_type(module, inner, style, root_module);
@@ -183,7 +184,7 @@ pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRef
             match style {
                 TypeRefStyle::InTypesFile => format!("{module_name}.t"),
                 TypeRefStyle::InRecursiveGroup => rescript_type_name(pascal_name),
-                TypeRefStyle::External => format!("{root_module}__Types.{module_name}.t"),
+                TypeRefStyle::ViaGateway => format!("Types.{module_name}.t"),
             }
         }
     }

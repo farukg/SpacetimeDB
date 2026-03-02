@@ -23,7 +23,6 @@ use std::ops::Deref;
 pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> OutputFile {
     let types: Vec<_> = iter_types(module).collect();
     let typespace = module.typespace_for_generate();
-    let sdk_module = format!("{root_module}__Sdk");
 
     // ── Newtype unwrappers ───────────────────────────────────────────────────
     //
@@ -135,7 +134,6 @@ pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> Ou
         enum_to_strings: &enum_to_strings,
         enum_from_strings: &enum_from_strings,
         root_module,
-        sdk_module: &sdk_module,
     };
 
     OutputFile {
