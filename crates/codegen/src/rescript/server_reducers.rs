@@ -1,6 +1,6 @@
 //! Server-side reducer wrappers codegen — generates `StdbServerReducers.res`.
 
-use super::helpers::rescript_field_name;
+use super::helpers::{rescript_field_name, sibling_opens};
 use super::templates::{
     AutoGenHeaderRes, ServerReducerTypeFieldRes, ServerReducerValueFieldRes, ServerReducerWrapperRes,
     StdbServerReducersRes,
@@ -61,6 +61,7 @@ pub(super) fn generate_server_reducers_file(
         })
         .collect();
 
+    let opens = sibling_opens(root_module, &["Sdk", "Client", "Reducers"]);
     OutputFile {
         filename: format!("{root_module}__ServerReducers.res"),
         code: StdbServerReducersRes {
@@ -69,7 +70,7 @@ pub(super) fn generate_server_reducers_file(
             reducer_type_fields,
             reducer_value_fields,
             has_reducers,
-            root_module,
+            sibling_opens: &opens,
         }
         .to_string(),
     }

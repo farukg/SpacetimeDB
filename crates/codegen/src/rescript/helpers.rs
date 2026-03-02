@@ -293,6 +293,21 @@ pub fn schema_type_binding_name(pascal_name: &str) -> String {
     format!("{camel}_")
 }
 
+/// Pre-render `module Alias = {root}__Alias` lines for sibling module imports.
+///
+/// Replaces `open {root_module}` in generated files, which creates circular dependencies
+/// because the root gateway re-exports all siblings (e.g. `Stdb.res` has
+/// `module Types = Stdb__Types` etc., so `open Stdb` → cycle).
+///
+/// Each generated file instead declares only the specific sibling aliases it needs.
+pub fn sibling_opens(root_module: &str, siblings: &[&str]) -> String {
+    siblings
+        .iter()
+        .map(|s| format!("module {s} = {root_module}__{s}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 // ---------------------------------------------------------------------------
 // Newtype helpers (A2)
 // ---------------------------------------------------------------------------

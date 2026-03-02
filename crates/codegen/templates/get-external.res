@@ -1,1 +1,0 @@
-@get external {{self.name}}: {{self.source_type}} => {{self.return_type}} = "{{self.js_name}}"

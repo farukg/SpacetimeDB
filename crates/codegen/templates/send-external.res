@@ -1,1 +1,0 @@
-@send external {{self.name}}: {{self.type_sig}} = "{{self.js_name}}"

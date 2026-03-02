@@ -1,12 +1,11 @@
 {{self.header}}
-open {{self.root_module}}
+{{self.sibling_opens}}
+module Self = {{self.reducer_module}}
 %% if self.has_args {
 
-open {{self.reducer_module}}
-
-let call = async (conn: Sdk.connection, args: args) => {
+let call = async (conn: Sdk.connection, args: Self.args) => {
   try {
-    await conn->Client.reducers->{{self.accessor}}(args)
+    await conn->Client.reducers->Self.{{self.accessor}}(args)
     Ok()
   } catch {
   | exn => Error(exn)
@@ -16,7 +15,7 @@ let call = async (conn: Sdk.connection, args: args) => {
 
 let call = async (conn: Sdk.connection) => {
   try {
-    await conn->Client.reducers->{{self.accessor}}
+    await conn->Client.reducers->Self.{{self.accessor}}
     Ok()
   } catch {
   | exn => Error(exn)

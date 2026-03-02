@@ -5,3 +5,4 @@ let {{self.fn_name}} = (v: string): option<{{self.module_name}}.t> =>
 %% }
   | _ => None
   }
+

@@ -146,6 +146,14 @@ pub(super) fn generate_gateway_files(
             alias: "ServerReducers".to_string(),
             target: format!("{root_module}__ServerReducers"),
         },
+        AliasData {
+            alias: "React".to_string(),
+            target: format!("{root_module}__React"),
+        },
+        AliasData {
+            alias: "Provider".to_string(),
+            target: format!("{root_module}__Provider"),
+        },
     ];
 
     if !procedure_data.is_empty() {

@@ -1,5 +1,5 @@
 {{self.header}}
-open {{self.root_module}}
+{{self.sibling_opens}}
 open Types
 open Sdk
 

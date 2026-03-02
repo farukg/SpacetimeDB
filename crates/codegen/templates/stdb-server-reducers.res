@@ -8,7 +8,7 @@
 //   })
 //   let result = await ServerReducers.serverReducers.addPlayer({name: "Alice"})
 
-open {{self.root_module}}
+{{self.sibling_opens}}
 
 module type Config = {
   let getConnection: unit => promise<Sdk.connection>

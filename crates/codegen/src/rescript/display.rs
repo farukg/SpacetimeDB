@@ -7,7 +7,7 @@
 //! 2. **Newtype unwrappers** — one `let` per Product type with exactly 1 field.
 //! 3. **Enum toString** — one `switch` function per PlainEnum type.
 
-use super::helpers::{rescript_constructor_name, rescript_field_name, rescript_module_name};
+use super::helpers::{rescript_constructor_name, rescript_field_name, rescript_module_name, sibling_opens};
 use super::templates::{
     AutoGenHeaderRes, DisplayEnumArmRes, DisplayEnumFromStringArmRes, DisplayEnumFromStringRes, DisplayEnumToStringRes,
     DisplayUnwrapperRes, StdbDisplayRes,
@@ -128,12 +128,13 @@ pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> Ou
         );
     }
 
+    let opens = sibling_opens(root_module, &["Types", "Sdk"]);
     let display = StdbDisplayRes {
         header: AutoGenHeaderRes,
         unwrappers: &unwrappers,
         enum_to_strings: &enum_to_strings,
         enum_from_strings: &enum_from_strings,
-        root_module,
+        sibling_opens: &opens,
     };
 
     OutputFile {

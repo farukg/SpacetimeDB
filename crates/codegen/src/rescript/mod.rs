@@ -34,7 +34,7 @@ use crate::{AsyncStyle, CodegenOptions, OutputFile};
 use super::Lang;
 use helpers::{
     procedure_module_name, reducer_module_name, render_record_type, render_res_type, rescript_field_name,
-    table_module_name, TypeRefStyle,
+    sibling_opens, table_module_name, TypeRefStyle,
 };
 use templates::{
     AutoGenHeaderRes, PkIndexSectionRes, ProcedureFileRes, ReducerMakeFunctorRes, ReducerNoArgsFileRes,
@@ -143,6 +143,23 @@ impl Lang for ReScript {
         // Display projection: type display + let toDisplay.
         let display_section = display_projection::render_display_section(module, &product_def.elements, root_module);
 
+        // Build sibling opens for this table file.
+        // All table files need Sdk (eventCtx, externals) and Types (row field types).
+        // Display is needed when the table has fields (display_section non-empty).
+        // Async is needed when observer_section is non-empty.
+        // React is needed when react_hooks is non-empty.
+        let mut table_siblings: Vec<&str> = vec!["Sdk", "Types"];
+        if !display_section.is_empty() {
+            table_siblings.push("Display");
+        }
+        if !observer_section.is_empty() {
+            table_siblings.push("Async");
+        }
+        if !react_hooks.is_empty() {
+            table_siblings.push("React");
+        }
+        let table_opens = sibling_opens(root_module, &table_siblings);
+
         OutputFile {
             filename: format!("{}.res", table_module_name(root_module, &table.accessor_name)),
             code: TableFileRes {
@@ -154,7 +171,7 @@ impl Lang for ReScript {
                 observer_section,
                 react_hooks,
                 display_section: &display_section,
-                root_module,
+                sibling_opens: &table_opens,
             }
             .to_string(),
         }
@@ -205,6 +222,18 @@ impl Lang for ReScript {
                 AsyncStyle::Promise => "",
             };
 
+            // No-args reducer: needs Sdk (reducers/connection), Client (reducers).
+            // Async is needed when make_functor is non-empty (observer mode).
+            // React is needed when react_hooks is non-empty.
+            let mut no_args_siblings: Vec<&str> = vec!["Sdk", "Client"];
+            if !make_functor.is_empty() {
+                no_args_siblings.push("Async");
+            }
+            if !react_hooks.is_empty() {
+                no_args_siblings.push("React");
+            }
+            let no_args_opens = sibling_opens(root_module, &no_args_siblings);
+
             OutputFile {
                 filename: format!("{}.res", reducer_module_name(root_module, &reducer.name)),
                 code: ReducerNoArgsFileRes {
@@ -212,7 +241,7 @@ impl Lang for ReScript {
                     accessor: &accessor,
                     react_hooks,
                     make_functor,
-                    root_module,
+                    sibling_opens: &no_args_opens,
                 }
                 .to_string(),
             }
@@ -247,6 +276,19 @@ impl Lang for ReScript {
                 AsyncStyle::Promise => "",
             };
 
+            // With-args reducer: needs Sdk (reducers/connection), Client (reducers),
+            // Types (args record field types).
+            // Async is needed when make_functor is non-empty (observer mode).
+            // React is needed when react_hooks is non-empty.
+            let mut with_args_siblings: Vec<&str> = vec!["Sdk", "Client", "Types"];
+            if !make_functor.is_empty() {
+                with_args_siblings.push("Async");
+            }
+            if !react_hooks.is_empty() {
+                with_args_siblings.push("React");
+            }
+            let with_args_opens = sibling_opens(root_module, &with_args_siblings);
+
             OutputFile {
                 filename: format!("{}.res", reducer_module_name(root_module, &reducer.name)),
                 code: ReducerWithArgsFileRes {
@@ -255,7 +297,7 @@ impl Lang for ReScript {
                     accessor: &accessor,
                     react_hooks,
                     make_functor,
-                    root_module,
+                    sibling_opens: &with_args_opens,
                 }
                 .to_string(),
             }
@@ -321,11 +363,14 @@ impl Lang for ReScript {
             self.async_style,
         ));
         // Re-export shim: {root_module}__Sdk.res includes the runtime Stdb__Sdk module.
-        // When root_module == "Stdb" this is a self-include (harmless identity).
-        files.push(OutputFile {
-            filename: format!("{root_module}__Sdk.res"),
-            code: format!("{header}\ninclude Stdb__Sdk\n", header = AutoGenHeaderRes,),
-        });
+        // Skip when root_module == "Stdb" — the runtime package already provides Stdb__Sdk.res;
+        // generating a same-named file creates a circular self-include.
+        if root_module != "Stdb" {
+            files.push(OutputFile {
+                filename: format!("{root_module}__Sdk.res"),
+                code: format!("{header}\ninclude Stdb__Sdk\n", header = AutoGenHeaderRes,),
+            });
+        }
         if self.async_style != AsyncStyle::Promise {
             files.push(OutputFile {
                 filename: format!("{root_module}__Async.res"),
@@ -346,13 +391,15 @@ impl Lang for ReScript {
             let accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
             let reducer_mod_dotted = format!("Reducers.{}", reducer.name.deref().to_case(Case::Pascal));
             let reducer_mod = reducer_module_name(root_module, &reducer.name);
+            // Server file: needs Sdk (connection), Client (reducers), Reducers (for `open Reducers.Foo`).
+            let server_opens = sibling_opens(root_module, &["Sdk", "Client", "Reducers"]);
             files.push(OutputFile {
                 filename: format!("{reducer_mod}__Server.res"),
                 code: ReducerServerFileRes {
                     header: AutoGenHeaderRes,
                     has_args,
                     reducer_module: &reducer_mod_dotted,
-                    root_module,
+                    sibling_opens: &server_opens,
                     accessor: &accessor,
                 }
                 .to_string(),

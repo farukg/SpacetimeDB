@@ -1,6 +1,6 @@
 {{self.header}}
 
-open {{self.root_module}}
+{{self.sibling_opens}}
 
 {{self.row_type}}
 // Opaque table handle — obtained from Client.db
@@ -24,10 +24,10 @@ let tableName = "{{self.table_name}}"
 %% if !self.observer_section.is_empty() {
 {{self.observer_section}}
 %% }
+%% if !self.display_section.is_empty() {
+{{self.display_section}}
+%% }
 %% if !self.react_hooks.is_empty() {
 
 {{self.react_hooks}}
-%% }
-%% if !self.display_section.is_empty() {
-{{self.display_section}}
 %% }

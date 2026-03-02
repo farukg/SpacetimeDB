@@ -1,5 +1,5 @@
 {{self.header}}
-open {{self.root_module}}
+{{self.sibling_opens}}
 
 {{self.args_record}}
 @send external {{self.accessor}}: (Sdk.reducers, args) => promise<unit> = "{{self.accessor}}"

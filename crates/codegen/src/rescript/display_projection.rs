@@ -84,7 +84,7 @@ pub(super) fn render_display_section(
     }
 
     let typespace = module.typespace_for_generate();
-    // Bare module name — the calling file does `open {root_module}` which brings Display into scope.
+    // Bare module name — the calling file has `module Display = {root_module}__Display` via sibling_opens.
     let display_module = "Display";
 
     let mut display_fields: Vec<DisplayFieldData> = Vec::new();
@@ -277,7 +277,7 @@ fn classify_field(
         AlgebraicTypeUse::Ref(reference) => {
             let pascal_name = type_ref_name(module, *reference);
             let module_name = rescript_module_name(&pascal_name);
-            // Bare module name — the calling file does `open {root_module}` which brings Types into scope.
+            // Bare module name — the calling file has `module Types = {root_module}__Types` via sibling_opens.
             let types_module = "Types";
 
             match &typespace[*reference] {

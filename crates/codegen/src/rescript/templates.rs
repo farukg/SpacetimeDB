@@ -228,7 +228,8 @@ pub(super) struct TableFileRes<'a> {
     pub react_hooks: &'a str,
     /// Pre-rendered display projection section, or empty string if unit type.
     pub display_section: &'a str,
-    pub root_module: &'a str,
+    /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
+    pub sibling_opens: &'a str,
 }
 
 /// Per-reducer file (with args): `Stdb*Reducer.res`.
@@ -242,7 +243,8 @@ pub(super) struct ReducerWithArgsFileRes<'a> {
     pub react_hooks: &'a str,
     /// Pre-rendered Make functor section, or empty string when async_style = Promise.
     pub make_functor: &'a str,
-    pub root_module: &'a str,
+    /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
+    pub sibling_opens: &'a str,
 }
 
 /// Per-reducer file (no args): `Stdb*Reducer.res`.
@@ -254,7 +256,8 @@ pub(super) struct ReducerNoArgsFileRes<'a> {
     pub react_hooks: &'a str,
     /// Pre-rendered Make functor section, or empty string when async_style = Promise.
     pub make_functor: &'a str,
-    pub root_module: &'a str,
+    /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
+    pub sibling_opens: &'a str,
 }
 
 /// Per-reducer server file: `Stdb__Reducers__X__Server.res`.
@@ -264,8 +267,10 @@ pub(super) struct ReducerServerFileRes<'a> {
     pub header: AutoGenHeaderRes,
     pub has_args: bool,
     /// Dotted module path for `open` (e.g. `Reducers.Foo`), not double-underscore.
+    /// Works because `sibling_opens` provides `module Reducers = {root}__Reducers`.
     pub reducer_module: &'a str,
-    pub root_module: &'a str,
+    /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
+    pub sibling_opens: &'a str,
     pub accessor: &'a str,
 }
 
@@ -298,7 +303,8 @@ pub(super) struct StdbServerReducersRes<'a> {
     pub reducer_type_fields: Vec<ServerReducerTypeFieldRes<'a>>,
     pub reducer_value_fields: Vec<ServerReducerValueFieldRes<'a>>,
     pub has_reducers: bool,
-    pub root_module: &'a str,
+    /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
+    pub sibling_opens: &'a str,
 }
 
 // ===========================================================================
@@ -362,7 +368,8 @@ pub(super) struct StdbDisplayRes<'a> {
     pub enum_to_strings: &'a str,
     /// Pre-rendered enum fromString functions.
     pub enum_from_strings: &'a str,
-    pub root_module: &'a str,
+    /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
+    pub sibling_opens: &'a str,
 }
 
 // ===========================================================================

@@ -1,6 +1,6 @@
 // Stdb__Sdk.res — Single source of truth for all SpacetimeDB SDK types and bindings.
 //
-// This file replaces the scattered type declarations across StdbTypes preamble,
+// This file replaces the scattered type declarations across Stdb.Types preamble,
 // StdbServerConnection externals, and SpacetimeDBSdk facade.
 //
 // KEY INSIGHT: The SDK's AlgebraicType is pure data — plain tagged-union JS objects
