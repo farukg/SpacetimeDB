@@ -808,7 +808,7 @@ ${ty.variants
       // so deserialized values must match that shape for === to work.
       const isPlainEnum = ty.variants.every(
         v =>
-          getTag(v.algebraicType) === 'Product' &&
+          v.algebraicType.tag === 'Product' &&
           (v.algebraicType as AlgebraicTypeVariants.Product).value.elements.length === 0
       );
       if (isPlainEnum) {

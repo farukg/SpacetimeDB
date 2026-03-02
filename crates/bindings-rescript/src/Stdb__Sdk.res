@@ -74,13 +74,11 @@ type scheduleAt =
 
 // ─── AlgebraicType — two-tier @unboxed + @tag("tag") design ─────────
 //
-// The SDK's `getTag()` handles both bare strings and tagged objects:
-//   getTag("U64") → "U64"   (typeof === "string")
-//   getTag({tag: "Product", value: ...}) → "Product"
-//
-// @unboxed algebraicType compiles primitives to bare strings ("U8", "Bool")
-// and the single Compound(...) arm to {tag: "Product"|"Sum"|"Array"|"Ref", ...}.
-// No %identity casts needed — all shapes are type-safe and SDK-compatible.
+// @unboxed compiles primitives to bare strings ("U8", "Bool", "U64").
+// The SDK expects {tag: "U64"} objects. The js_exports.mjs shim
+// normalizes bare strings → {tag: str} before the SDK sees them.
+// Compound types (Product/Sum/Array/Ref) already compile to {tag: "...", value: ...}
+// via @tag("tag") on compoundType, so they pass through unchanged.
 
 // Supporting types — parameterized to break mutual recursion
 type productElement<'a> = {name: option<string>, algebraicType: 'a}
@@ -209,7 +207,7 @@ type dbConnectionBuilder
 type dbConfig
 type dbConnectionImpl
 
-@new @module("spacetimedb/sdk")
+@new @module("@spacetimedb/rescript/src/js_exports.mjs")
 external makeDbConnectionBuilder: (remoteModule, dbConfig => dbConnectionImpl) => dbConnectionBuilder =
   "DbConnectionBuilder"
 
