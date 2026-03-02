@@ -4,7 +4,6 @@ import {
   type AlgebraicTypeVariants,
   type Deserializer,
   type Serializer,
-  getTag,
 } from '../lib/algebraic_type';
 import type { Identity } from '../lib/identity';
 import type { OptionAlgebraicType } from '../lib/option';
@@ -175,7 +174,7 @@ export function registerView<
   }
 
   // If it is an option, we wrap the function to make the return look like an array.
-  if (getTag(returnType) == 'Sum') {
+  if (returnType.tag == 'Sum') {
     const originalFn = fn;
     fn = ((ctx: ViewCtx<S>, args: InferTypeOfRow<Params>) => {
       const ret = originalFn(ctx, args);

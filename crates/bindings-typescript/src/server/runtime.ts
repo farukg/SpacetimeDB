@@ -5,8 +5,6 @@ import {
   AlgebraicType,
   ProductType,
   type Deserializer,
-  type AlgebraicTypeVariants,
-  getTag,
 } from '../lib/algebraic_type';
 import {
   RawModuleDef,
@@ -426,7 +424,7 @@ function makeTableView(
 ): Table<any> {
   const table_id = sys.table_id_from_name(table.sourceName);
   const rowType = typespace.types[table.productTypeRef];
-  if (getTag(rowType) !== 'Product') {
+  if (rowType.tag !== 'Product') {
     throw 'impossible';
   }
 
@@ -434,7 +432,7 @@ function makeTableView(
   const deserializeRow = AlgebraicType.makeDeserializer(rowType, typespace);
 
   const sequences = table.sequences.map(seq => {
-    const col = (rowType as AlgebraicTypeVariants.Product).value.elements[seq.column];
+    const col = rowType.value.elements[seq.column];
     const colType = col.algebraicType;
 
     // Determine the sentinel value which users will pass to as a placeholder
@@ -442,7 +440,7 @@ function makeTableView(
     // For small integer SATS types which fit in V8 `number`s, this is `0: number`,
     // and for larger integer SATS types it's `0n: BigInt`.
     let sequenceTrigger: bigint | number;
-    switch (getTag(colType)) {
+    switch (colType.tag) {
       case 'U8':
       case 'I8':
       case 'U16':

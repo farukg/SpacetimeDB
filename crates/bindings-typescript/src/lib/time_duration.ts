@@ -1,4 +1,4 @@
-import { AlgebraicType, getTag, type AlgebraicTypeVariants } from './algebraic_type';
+import { AlgebraicType } from './algebraic_type';
 
 export type TimeDurationAlgebraicType = {
   tag: 'Product';
@@ -35,17 +35,17 @@ export class TimeDuration {
   static isTimeDuration(
     algebraicType: AlgebraicType
   ): algebraicType is TimeDurationAlgebraicType {
-    if (getTag(algebraicType) !== 'Product') {
+    if (algebraicType.tag !== 'Product') {
       return false;
     }
-    const elements = (algebraicType as AlgebraicTypeVariants.Product).value.elements;
+    const elements = algebraicType.value.elements;
     if (elements.length !== 1) {
       return false;
     }
     const microsElement = elements[0];
     return (
       microsElement.name === '__time_duration_micros__' &&
-      getTag(microsElement.algebraicType) === 'I64'
+      microsElement.algebraicType.tag === 'I64'
     );
   }
 

@@ -127,31 +127,30 @@ export function toSnakeCase<T extends string>(str: T): SnakeCase<T> {
     .toLowerCase() as SnakeCase<T>;
 }
 
-import type { AlgebraicType, AlgebraicTypeVariants } from './algebraic_type';
-import { getTag } from './algebraic_type';
+import type { AlgebraicType } from './algebraic_type';
 import type { Typespace } from './autogen/types';
 import type { ColumnBuilder, TypeBuilder } from './type_builders';
 import type { ParamsObj } from './reducers';
 
 export function bsatnBaseSize(typespace: Typespace, ty: AlgebraicType): number {
   const assumedArrayLength = 4;
-  while (getTag(ty) === 'Ref') ty = typespace.types[(ty as AlgebraicTypeVariants.Ref).value];
-  if (getTag(ty) === 'Product') {
+  while (ty.tag === 'Ref') ty = typespace.types[ty.value];
+  if (ty.tag === 'Product') {
     let sum = 0;
-    for (const { algebraicType: elem } of (ty as AlgebraicTypeVariants.Product).value.elements) {
+    for (const { algebraicType: elem } of ty.value.elements) {
       sum += bsatnBaseSize(typespace, elem);
     }
     return sum;
-  } else if (getTag(ty) === 'Sum') {
+  } else if (ty.tag === 'Sum') {
     let min = Infinity;
-    for (const { algebraicType: vari } of (ty as AlgebraicTypeVariants.Sum).value.variants) {
+    for (const { algebraicType: vari } of ty.value.variants) {
       const vSize = bsatnBaseSize(typespace, vari);
       if (vSize < min) min = vSize;
     }
     if (min === Infinity) min = 0;
     return 4 + min;
-  } else if (getTag(ty) == 'Array') {
-    return 4 + assumedArrayLength * bsatnBaseSize(typespace, (ty as AlgebraicTypeVariants.Array).value);
+  } else if (ty.tag == 'Array') {
+    return 4 + assumedArrayLength * bsatnBaseSize(typespace, ty.value);
   }
   return {
     String: 4 + assumedArrayLength,
@@ -171,7 +170,7 @@ export function bsatnBaseSize(typespace: Typespace, ty: AlgebraicType): number {
     U128: 16,
     I256: 32,
     U256: 32,
-  }[getTag(ty)]!;
+  }[ty.tag];
 }
 
 export type CoerceTypeBuilder<
