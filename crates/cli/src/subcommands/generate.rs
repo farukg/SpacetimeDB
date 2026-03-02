@@ -5,9 +5,10 @@ use clap::parser::ValueSource;
 use clap::Arg;
 use clap::ArgAction::{Set, SetTrue};
 use fs_err as fs;
+use spacetimedb_codegen::rescript::config as rescript_config;
 use spacetimedb_codegen::{
-    generate, private_table_names, AsyncStyle, CodegenOptions, CodegenVisibility, Csharp, Lang, OutputFile, ReScript,
-    Rust, TypeScript, UnrealCpp, AUTO_GENERATED_PREFIX,
+    generate, private_table_names, CodegenOptions, CodegenVisibility, Csharp, Lang, OutputFile, ReScript, Rust,
+    TypeScript, UnrealCpp, AUTO_GENERATED_PREFIX,
 };
 use spacetimedb_lib::de::serde::DeserializeWrapper;
 use spacetimedb_lib::{sats, RawModuleDef};
@@ -455,6 +456,7 @@ pub async fn run_prepared_generate_configs(
     json_module: Option<Vec<PathBuf>>,
     force: bool,
     namespace_from_cli: bool,
+    config_dir: Option<&Path>,
 ) -> anyhow::Result<()> {
     for run in run_configs {
         println!(
@@ -505,6 +507,7 @@ pub async fn run_prepared_generate_configs(
 
         let csharp_lang;
         let unreal_cpp_lang;
+        let rescript_lang;
         let gen_lang = match run.lang {
             Language::Csharp => {
                 csharp_lang = Csharp {
@@ -520,10 +523,19 @@ pub async fn run_prepared_generate_configs(
                 &unreal_cpp_lang as &dyn Lang
             }
             Language::Rust => &Rust,
-            Language::ReScript => &ReScript {
-                async_style: AsyncStyle::All,
-                root_module: "Stdb".to_string(),
-            },
+            Language::ReScript => {
+                let mut search_paths: Vec<&Path> = vec![run.out_dir.as_path()];
+                if let Some(dir) = config_dir {
+                    search_paths.push(dir);
+                }
+                let rescript_config =
+                    rescript_config::load_config(&search_paths).context("failed to load stdb-codegen.toml")?;
+                rescript_lang = ReScript {
+                    async_style: rescript_config.async_style,
+                    root_module: rescript_config.root_module,
+                };
+                &rescript_lang as &dyn Lang
+            }
             Language::TypeScript => &TypeScript,
         };
 
@@ -650,6 +662,7 @@ pub async fn exec_ex(
         json_module,
         force,
         namespace_from_cli,
+        config_dir,
     )
     .await
 }
@@ -676,7 +689,7 @@ pub async fn exec_from_entries(
         .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
     let run_configs = prepare_generate_run_configs(generate_configs, true, config_dir)?;
-    run_prepared_generate_configs(run_configs, extract_descriptions, None, force, false).await
+    run_prepared_generate_configs(run_configs, extract_descriptions, None, force, false, config_dir).await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]

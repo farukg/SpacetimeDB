@@ -16,12 +16,15 @@ anyhow.workspace = true
 boilerplate = "1.1.1"
 convert_case.workspace = true
 itertools.workspace = true
+serde = { workspace = true, features = ["derive"] }
+toml.workspace = true
 
 [dev-dependencies]
 fs-err.workspace = true
 insta.workspace = true
 regex.workspace = true
 spacetimedb-testing = { path = "../testing" }
+tempfile.workspace = true
 
 [lints]
 workspace = true

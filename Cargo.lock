@@ -7823,11 +7823,14 @@ dependencies = [
  "insta",
  "itertools 0.12.1",
  "regex",
+ "serde",
  "spacetimedb-data-structures",
  "spacetimedb-lib 2.0.0",
  "spacetimedb-primitives 2.0.0",
  "spacetimedb-schema",
  "spacetimedb-testing",
+ "tempfile",
+ "toml 0.8.23",
 ]
 
 [[package]]

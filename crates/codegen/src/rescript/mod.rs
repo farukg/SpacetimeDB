@@ -15,6 +15,7 @@
 //! - `display` — `StdbDisplay.res` generator (unwrappers + toString helpers)
 
 mod client;
+pub mod config;
 mod display;
 pub(crate) mod helpers;
 mod index_file;
