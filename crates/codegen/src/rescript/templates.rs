@@ -195,16 +195,15 @@ pub(super) struct StdbClientRes<'a> {
     pub sdk_module: &'a str,
 }
 
-/// `index.res` — module re-exports.
+/// Namespace gateway file (root, tables, reducers, procedures).
+/// Renders a flat list of module aliases.
 #[derive(Boilerplate)]
-pub(super) struct IndexRes<'a> {
+pub(super) struct NamespaceGatewayRes<'a> {
     pub header: AutoGenHeaderRes,
-    pub table_aliases: Vec<ModuleAliasRes<'a>>,
-    pub reducer_aliases: Vec<ModuleAliasRes<'a>>,
-    pub procedure_aliases: Vec<ModuleAliasRes<'a>>,
+    pub aliases: Vec<ModuleAliasRes<'a>>,
 }
 
-/// Per-table file: `Stdb*Table.res`.
+/// Per-table file: `Stdb__Tables__*.res`.
 #[derive(Boilerplate)]
 pub(super) struct TableFileRes<'a> {
     pub header: AutoGenHeaderRes,

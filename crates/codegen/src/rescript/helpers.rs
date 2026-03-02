@@ -93,21 +93,21 @@ pub fn rescript_constructor_name(name: &str) -> String {
 
 pub fn table_module_name(root_module: &str, table_name: &Identifier) -> String {
     format!(
-        "{root_module}__{name}Table",
+        "{root_module}__Tables__{name}",
         name = table_name.deref().to_case(Case::Pascal)
     )
 }
 
 pub fn reducer_module_name(root_module: &str, reducer_name: &spacetimedb_schema::reducer_name::ReducerName) -> String {
     format!(
-        "{root_module}__{name}Reducer",
+        "{root_module}__Reducers__{name}",
         name = reducer_name.deref().to_case(Case::Pascal)
     )
 }
 
 pub fn procedure_module_name(root_module: &str, procedure_name: &Identifier) -> String {
     format!(
-        "{root_module}__{name}Procedure",
+        "{root_module}__Procedures__{name}",
         name = procedure_name.deref().to_case(Case::Pascal)
     )
 }

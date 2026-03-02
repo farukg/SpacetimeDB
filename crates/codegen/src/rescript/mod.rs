@@ -119,7 +119,7 @@ impl Lang for ReScript {
         };
 
         OutputFile {
-            filename: format!("tables/{}.res", table_module_name(root_module, &table.accessor_name)),
+            filename: format!("{}.res", table_module_name(root_module, &table.accessor_name)),
             code: TableFileRes {
                 header: AutoGenHeaderRes,
                 row_type: row_type.trim_end(),
@@ -145,7 +145,7 @@ impl Lang for ReScript {
 
         if !is_reducer_invokable(reducer) {
             return OutputFile {
-                filename: format!("reducers/{}.res", reducer_module_name(root_module, &reducer.name)),
+                filename: format!("{}.res", reducer_module_name(root_module, &reducer.name)),
                 code: String::new(),
             };
         }
@@ -187,7 +187,7 @@ impl Lang for ReScript {
             };
 
             OutputFile {
-                filename: format!("reducers/{}.res", reducer_module_name(root_module, &reducer.name)),
+                filename: format!("{}.res", reducer_module_name(root_module, &reducer.name)),
                 code: ReducerNoArgsFileRes {
                     header: AutoGenHeaderRes,
                     accessor: &accessor,
@@ -253,7 +253,7 @@ impl Lang for ReScript {
             };
 
             OutputFile {
-                filename: format!("reducers/{}.res", reducer_module_name(root_module, &reducer.name)),
+                filename: format!("{}.res", reducer_module_name(root_module, &reducer.name)),
                 code: ReducerWithArgsFileRes {
                     header: AutoGenHeaderRes,
                     args_record: args_record.trim_end(),
@@ -290,10 +290,7 @@ impl Lang for ReScript {
         );
 
         OutputFile {
-            filename: format!(
-                "procedures/{}.res",
-                procedure_module_name(root_module, &procedure.accessor_name)
-            ),
+            filename: format!("{}.res", procedure_module_name(root_module, &procedure.accessor_name)),
             code: ProcedureFileRes {
                 header: AutoGenHeaderRes,
                 params_record: params_record.trim_end(),
@@ -304,22 +301,32 @@ impl Lang for ReScript {
         }
     }
 
-    /// Returns global files: {root_module}__Types.res, {root_module}__Schema.res,
-    /// {root_module}__Client.res, index.res, {root_module}__ServerReducers.res,
-    /// {root_module}__React.res, {root_module}__Provider.res, {root_module}__Display.res,
-    /// {root_module}__Sdk.res (re-export shim).
-    /// When async_style ∈ {Observer, All}, also emits {root_module}__Async.res.
+    /// Returns global files:
+    /// - {root}.res (root gateway)
+    /// - {root}__Types.res, {root}__Schema.res, {root}__Client.res
+    /// - {root}__Tables.res (table gateway), {root}__Reducers.res (reducer gateway)
+    /// - {root}__React.res, {root}__Display.res
+    /// - {root}__ServerReducers.res
+    /// - {root}__Sdk.res (re-export shim)
+    /// - {root}__Async.res (when async_style ≠ Promise)
+    /// - {root}__Procedures.res (when procedures exist)
     fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
         let root_module = &self.root_module;
         let mut files = vec![
             types::generate_types_file(module, root_module),
             schema::generate_schema_file(module, options, root_module),
             client::generate_client_file(module, options, root_module),
-            index_file::generate_index_file(module, options, root_module),
             server_reducers::generate_server_reducers_file(module, options, root_module),
             display::generate_display_file(module, root_module),
         ];
         files.extend(react::generate_react_file(module, root_module));
+        // Namespace gateways: root, tables, reducers, procedures.
+        files.extend(index_file::generate_gateway_files(
+            module,
+            options,
+            root_module,
+            self.async_style,
+        ));
         // Re-export shim: {root_module}__Sdk.res includes the runtime Stdb__Sdk module.
         // When root_module == "Stdb" this is a self-include (harmless identity).
         files.push(OutputFile {
