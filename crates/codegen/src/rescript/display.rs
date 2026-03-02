@@ -9,7 +9,8 @@
 
 use super::helpers::{rescript_constructor_name, rescript_field_name, rescript_module_name};
 use super::templates::{
-    AutoGenHeaderRes, DisplayEnumArmRes, DisplayEnumToStringRes, DisplayUnwrapperRes, StdbDisplayRes,
+    AutoGenHeaderRes, DisplayEnumArmRes, DisplayEnumFromStringArmRes, DisplayEnumFromStringRes,
+    DisplayEnumToStringRes, DisplayUnwrapperRes, StdbDisplayRes,
 };
 use crate::util::{iter_types, type_ref_name};
 use crate::OutputFile;
@@ -96,24 +97,43 @@ pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> Ou
         .collect();
 
     let mut enum_to_strings = String::new();
+    let mut enum_from_strings = String::new();
     for data in &enum_data {
-        let arms: Vec<DisplayEnumArmRes> = data
+        let to_arms: Vec<DisplayEnumArmRes> = data
             .constructors
             .iter()
             .map(|c| DisplayEnumArmRes { constructor: c })
             .collect();
-        let tmpl = DisplayEnumToStringRes {
-            fn_name: &data.fn_name,
-            module_name: &data.module_name,
-            arms,
-        };
-        enum_to_strings.push_str(&tmpl.to_string());
+        enum_to_strings.push_str(
+            &DisplayEnumToStringRes {
+                fn_name: &data.fn_name,
+                module_name: &data.module_name,
+                arms: to_arms,
+            }
+            .to_string(),
+        );
+
+        let from_fn_name = data.fn_name.replace("ToString", "FromString");
+        let from_arms: Vec<DisplayEnumFromStringArmRes> = data
+            .constructors
+            .iter()
+            .map(|c| DisplayEnumFromStringArmRes { constructor: c })
+            .collect();
+        enum_from_strings.push_str(
+            &DisplayEnumFromStringRes {
+                fn_name: &from_fn_name,
+                module_name: &data.module_name,
+                arms: from_arms,
+            }
+            .to_string(),
+        );
     }
 
     let display = StdbDisplayRes {
         header: AutoGenHeaderRes,
         unwrappers: &unwrappers,
         enum_to_strings: &enum_to_strings,
+        enum_from_strings: &enum_from_strings,
         sdk_module: &sdk_module,
     };
 

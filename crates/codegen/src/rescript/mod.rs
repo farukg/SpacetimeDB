@@ -17,8 +17,10 @@
 mod client;
 pub mod config;
 mod display;
+mod display_projection;
 pub(crate) mod helpers;
 mod index_file;
+mod labels;
 mod react;
 mod schema;
 mod server_reducers;
@@ -26,7 +28,7 @@ pub(super) mod templates;
 mod topo;
 mod types;
 
-use crate::util::is_reducer_invokable;
+use crate::util::{is_reducer_invokable, iter_reducers};
 use crate::{AsyncStyle, CodegenOptions, OutputFile};
 
 use super::Lang;
@@ -36,14 +38,13 @@ use helpers::{
 };
 use templates::{
     AutoGenHeaderRes, PkIndexSectionRes, ProcedureFileRes, ReducerMakeFunctorRes, ReducerNoArgsFileRes,
-    ReducerReactHookSectionRes, ReducerWithArgsFileRes, StdbAsyncRes, TableEventSectionRes, TableFileRes,
-    TableObserverSectionRes, TableReactHookSectionRes,
+    ReducerReactHookSectionRes, ReducerServerFileRes, ReducerWithArgsFileRes, StdbAsyncRes,
+    TableEventSectionRes, TableFileRes, TableObserverSectionRes, TableReactHookSectionRes,
 };
 
 use convert_case::{Case, Casing};
 use spacetimedb_schema::def::{ModuleDef, ProcedureDef, ReducerDef, TableDef};
 use spacetimedb_schema::schema::TableSchema;
-use std::fmt::Write;
 use std::ops::Deref;
 
 pub struct ReScript {
@@ -64,22 +65,35 @@ impl Lang for ReScript {
 
         let root_module = &self.root_module;
         let sdk_module = format!("{root_module}__Sdk");
+        let react_module = format!("{root_module}__React");
 
         // Pre-render row record type.
         let row_type = render_record_type(module, "t", &product_def.elements, TypeRefStyle::External, root_module);
 
+        // Pre-render PK info (shared by PK index section + React hooks).
+        let pk_field_camel_buf;
+        let pk_type_buf;
+        let has_pk = table.primary_key.is_some();
+        let (pk_field_camel, pk_field_raw_str, pk_type_str): (&str, &str, &str) =
+            if let Some(pk_col) = table.primary_key {
+                let (pk_field, pk_type) = &product_def.elements[pk_col.idx()];
+                pk_field_camel_buf = rescript_field_name(pk_field.deref().to_case(Case::Camel));
+                pk_type_buf = render_res_type(module, pk_type, TypeRefStyle::External, root_module);
+                (&pk_field_camel_buf, pk_field.deref(), &pk_type_buf)
+            } else {
+                // Assignments required for borrow lifetimes even though values are empty.
+                pk_field_camel_buf = String::new();
+                pk_type_buf = String::new();
+                (&pk_field_camel_buf, "", &pk_type_buf)
+            };
+
         // Pre-render PK index section.
         let pk_section_str;
-        let pk_section: &str = if let Some(pk_col) = table.primary_key {
-            let (pk_field, pk_type) = &product_def.elements[pk_col.idx()];
-            let pk_field_raw = pk_field.deref();
-            let pk_field_camel = rescript_field_name(pk_field_raw.to_case(Case::Camel));
-            let type_buf = render_res_type(module, pk_type, TypeRefStyle::External, root_module);
-
+        let pk_section: &str = if has_pk {
             pk_section_str = PkIndexSectionRes {
-                field_camel: &pk_field_camel,
-                field_raw: pk_field_raw,
-                find_param_type: &type_buf,
+                field_camel: pk_field_camel,
+                field_raw: pk_field_raw_str,
+                find_param_type: pk_type_str,
             }
             .to_string();
             &pk_section_str
@@ -88,6 +102,7 @@ impl Lang for ReScript {
         };
 
         let accessor = table.accessor_name.deref();
+        let has_display = !product_def.elements.is_empty();
 
         // Always emit the typed event union + subscribe.
         let event_section = TableEventSectionRes {
@@ -112,11 +127,23 @@ impl Lang for ReScript {
         let react_hooks_str;
         let react_hooks: &str = match self.async_style {
             AsyncStyle::Promise | AsyncStyle::All => {
-                react_hooks_str = TableReactHookSectionRes { accessor }.to_string();
+                react_hooks_str = TableReactHookSectionRes {
+                    accessor,
+                    react_module: &react_module,
+                    has_pk,
+                    pk_type: pk_type_str,
+                    pk_field_camel,
+                    has_display,
+                }
+                .to_string();
                 &react_hooks_str
             }
             AsyncStyle::Observer => "",
         };
+
+        // Display projection: type display + let toDisplay.
+        let display_section =
+            display_projection::render_display_section(module, &product_def.elements, root_module);
 
         OutputFile {
             filename: format!("{}.res", table_module_name(root_module, &table.accessor_name)),
@@ -128,6 +155,7 @@ impl Lang for ReScript {
                 event_section: &event_section,
                 observer_section,
                 react_hooks,
+                display_section: &display_section,
                 sdk_module: &sdk_module,
             }
             .to_string(),
@@ -142,6 +170,7 @@ impl Lang for ReScript {
     fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
         let root_module = &self.root_module;
         let sdk_module = format!("{root_module}__Sdk");
+        let react_module = format!("{root_module}__React");
 
         if !is_reducer_invokable(reducer) {
             return OutputFile {
@@ -166,6 +195,7 @@ impl Lang for ReScript {
                     react_hooks_str = ReducerReactHookSectionRes {
                         params_type: "unit",
                         camel_accessor: &camel_accessor,
+                        react_module: &react_module,
                     }
                     .to_string();
                     &react_hooks_str
@@ -201,30 +231,6 @@ impl Lang for ReScript {
             // Pre-render args record type.
             let args_record = render_record_type(module, "args", elements, TypeRefStyle::External, root_module);
 
-            // Pre-render labeled params for `let call`.
-            let call_params = {
-                let mut buf = String::new();
-                for (i, (field, ty)) in elements.iter().enumerate() {
-                    let field_name = rescript_field_name(field.deref().to_case(Case::Camel));
-                    let type_str = render_res_type(module, ty, TypeRefStyle::External, root_module);
-                    write!(buf, "~{field_name}: {type_str}").unwrap();
-                    if i < elements.len() - 1 {
-                        buf.push_str(", ");
-                    }
-                }
-                buf
-            };
-
-            // Pre-render record construction fields.
-            let call_body_fields = {
-                let mut buf = String::new();
-                for (field, _ty) in elements.iter() {
-                    let camel = rescript_field_name(field.deref().to_case(Case::Camel));
-                    writeln!(buf, "    {camel}: {camel},").unwrap();
-                }
-                buf
-            };
-
             // Pre-render React hooks when async_style ∈ {Promise, All}.
             let react_hooks_str;
             let react_hooks: &str = match self.async_style {
@@ -232,6 +238,7 @@ impl Lang for ReScript {
                     react_hooks_str = ReducerReactHookSectionRes {
                         params_type: "args",
                         camel_accessor: &camel_accessor,
+                        react_module: &react_module,
                     }
                     .to_string();
                     &react_hooks_str
@@ -258,8 +265,6 @@ impl Lang for ReScript {
                     header: AutoGenHeaderRes,
                     args_record: args_record.trim_end(),
                     accessor: &accessor,
-                    call_params: &call_params,
-                    call_body_fields: call_body_fields.trim_end(),
                     react_hooks,
                     make_functor,
                     sdk_module: &sdk_module,
@@ -337,6 +342,32 @@ impl Lang for ReScript {
             files.push(OutputFile {
                 filename: format!("{root_module}__Async.res"),
                 code: StdbAsyncRes.to_string(),
+            });
+        }
+        // Labels stub: per-PlainEnum translation functions.
+        let labels_file = labels::generate_labels_file(module, root_module, None);
+        if !labels_file.code.is_empty() {
+            files.push(labels_file);
+        }
+        // Per-reducer server files: typed error return via try/catch.
+        let sdk_module = format!("{root_module}__Sdk");
+        for reducer in iter_reducers(module, options.visibility) {
+            if !is_reducer_invokable(reducer) {
+                continue;
+            }
+            let has_args = !reducer.params_for_generate.elements.is_empty();
+            let accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
+            let reducer_mod = reducer_module_name(root_module, &reducer.name);
+            files.push(OutputFile {
+                filename: format!("{reducer_mod}__Server.res"),
+                code: ReducerServerFileRes {
+                    header: AutoGenHeaderRes,
+                    has_args,
+                    reducer_module: &reducer_mod,
+                    sdk_module: &sdk_module,
+                    accessor: &accessor,
+                }
+                .to_string(),
             });
         }
         files

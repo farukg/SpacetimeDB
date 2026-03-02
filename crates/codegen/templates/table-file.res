@@ -26,3 +26,6 @@ let tableName = "{{self.table_name}}"
 
 {{self.react_hooks}}
 %% }
+%% if !self.display_section.is_empty() {
+{{self.display_section}}
+%% }

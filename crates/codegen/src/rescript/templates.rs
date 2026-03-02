@@ -142,6 +142,11 @@ pub(super) struct PkIndexSectionRes<'a> {
 #[derive(Boilerplate)]
 pub(super) struct TableReactHookSectionRes<'a> {
     pub accessor: &'a str,
+    pub react_module: &'a str,
+    pub has_pk: bool,
+    pub pk_type: &'a str,
+    pub pk_field_camel: &'a str,
+    pub has_display: bool,
 }
 
 /// React reducer hook section (appears in every reducer file).
@@ -149,6 +154,7 @@ pub(super) struct TableReactHookSectionRes<'a> {
 pub(super) struct ReducerReactHookSectionRes<'a> {
     pub params_type: &'a str,
     pub camel_accessor: &'a str,
+    pub react_module: &'a str,
 }
 
 /// A single server reducer async wrapper function.
@@ -218,6 +224,8 @@ pub(super) struct TableFileRes<'a> {
     pub observer_section: &'a str,
     /// Pre-rendered React hooks section, or empty string when async_style = Observer.
     pub react_hooks: &'a str,
+    /// Pre-rendered display projection section, or empty string if unit type.
+    pub display_section: &'a str,
     pub sdk_module: &'a str,
 }
 
@@ -228,10 +236,6 @@ pub(super) struct ReducerWithArgsFileRes<'a> {
     /// Pre-rendered args record type block.
     pub args_record: &'a str,
     pub accessor: &'a str,
-    /// Pre-rendered labeled params for `let call`.
-    pub call_params: &'a str,
-    /// Pre-rendered record construction fields for `let call` body.
-    pub call_body_fields: &'a str,
     /// Pre-rendered React hooks section, or empty string when async_style = Observer.
     pub react_hooks: &'a str,
     /// Pre-rendered Make functor section, or empty string when async_style = Promise.
@@ -249,6 +253,17 @@ pub(super) struct ReducerNoArgsFileRes<'a> {
     /// Pre-rendered Make functor section, or empty string when async_style = Promise.
     pub make_functor: &'a str,
     pub sdk_module: &'a str,
+}
+
+/// Per-reducer server file: `Stdb__Reducers__X__Server.res`.
+/// Typed error return via try/catch: `promise<result<unit, exn>>`.
+#[derive(Boilerplate)]
+pub(super) struct ReducerServerFileRes<'a> {
+    pub header: AutoGenHeaderRes,
+    pub has_args: bool,
+    pub reducer_module: &'a str,
+    pub sdk_module: &'a str,
+    pub accessor: &'a str,
 }
 
 /// Per-procedure file: `Stdb*Procedure.res`.
@@ -315,11 +330,26 @@ pub(super) struct DisplayEnumToStringRes<'a> {
     pub arms: Vec<DisplayEnumArmRes<'a>>,
 }
 
+/// A single match arm in an enum fromString function.
+/// Renders: `  | "Constructor" => Some(Constructor)`
+#[derive(Boilerplate)]
+pub(super) struct DisplayEnumFromStringArmRes<'a> {
+    pub constructor: &'a str,
+}
+
+/// A single enum fromString function with switch arms + catch-all.
+#[derive(Boilerplate)]
+pub(super) struct DisplayEnumFromStringRes<'a> {
+    pub fn_name: &'a str,
+    pub module_name: &'a str,
+    pub arms: Vec<DisplayEnumFromStringArmRes<'a>>,
+}
+
 // ===========================================================================
 // Display Layer 2: File Composition
 // ===========================================================================
 
-/// `StdbDisplay.res` — mechanical unwrappers and toString functions.
+/// `StdbDisplay.res` — mechanical unwrappers, toString, and fromString functions.
 #[derive(Boilerplate)]
 pub(super) struct StdbDisplayRes<'a> {
     pub header: AutoGenHeaderRes,
@@ -327,6 +357,8 @@ pub(super) struct StdbDisplayRes<'a> {
     pub unwrappers: &'a str,
     /// Pre-rendered enum toString functions.
     pub enum_to_strings: &'a str,
+    /// Pre-rendered enum fromString functions.
+    pub enum_from_strings: &'a str,
     pub sdk_module: &'a str,
 }
 
@@ -482,4 +514,32 @@ pub(super) struct ReducerMakeFunctorRes<'a> {
     pub accessor: &'a str,
     pub has_args: bool,
     pub sdk_module: &'a str,
+}
+
+// ===========================================================================
+// Display Projection: per-table `type display` + `let toDisplay`
+// ===========================================================================
+
+/// A single field assignment in `let toDisplay` body.
+/// Renders: `  camelName: convertExpr,`
+#[derive(Boilerplate)]
+pub(super) struct DisplayProjectionFieldRes<'a> {
+    pub camel_name: &'a str,
+    pub convert_expr: &'a str,
+}
+
+/// A single field in the `type display` record.
+/// Renders: `  fieldName: typeStr,`
+#[derive(Boilerplate)]
+pub(super) struct DisplayProjectionTypeFieldRes<'a> {
+    pub camel_name: &'a str,
+    pub type_str: &'a str,
+}
+
+/// Display projection section for a table file.
+/// Contains: `type display = { ... }` + `let toDisplay = (row: t): display => { ... }`
+#[derive(Boilerplate)]
+pub(super) struct DisplayProjectionRes<'a> {
+    pub type_fields: Vec<DisplayProjectionTypeFieldRes<'a>>,
+    pub body_fields: Vec<DisplayProjectionFieldRes<'a>>,
 }

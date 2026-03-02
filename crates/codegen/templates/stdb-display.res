@@ -15,3 +15,6 @@ let amount = BigInt.toFloat
 // ── Enum toString ────────────────────────────────────────────────────
 
 {{self.enum_to_strings}}
+// ── Enum fromString ─────────────────────────────────────────────────
+
+{{self.enum_from_strings}}

@@ -20,14 +20,31 @@ type tableCallbacks<'row> = {
   onUpdate?: ('row, 'row) => unit,
 }
 
-@module("@spacetimedb/rescript/react")
-external useTable: query<'row> => (array<'row>, bool) = "useTable"
+type rowsState<'row> =
+  | Loading
+  | Ready(array<'row>)
 
 @module("@spacetimedb/rescript/react")
-external useTableWith: (query<'row>, tableCallbacks<'row>) => (array<'row>, bool) = "useTable"
+external useTable: query<'row> => array<'row> = "useTable"
+
+@module("@spacetimedb/rescript/react")
+external useTableWith: (query<'row>, tableCallbacks<'row>) => array<'row> = "useTable"
+
+@module("@spacetimedb/rescript/react")
+external useTableState: query<'row> => rowsState<'row> = "useTableState"
 
 @module("@spacetimedb/rescript/react")
 external useReducer: reducerDef<'params> => ('params => promise<unit>) = "useReducer"
+
+type mutationState<'args, 'error> = {
+  call: 'args => unit,
+  isPending: bool,
+  error: option<'error>,
+  reset: unit => unit,
+}
+
+@module("@spacetimedb/rescript/react")
+external useMutation: reducerDef<'args> => mutationState<'args, exn> = "useMutation"
 
 @module("@spacetimedb/rescript/react")
 external useSpacetimeDB: unit => connectionState = "useSpacetimeDB"

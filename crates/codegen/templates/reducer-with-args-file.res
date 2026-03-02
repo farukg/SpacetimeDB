@@ -3,10 +3,8 @@
 {{self.args_record}}
 @send external {{self.accessor}}: ({{self.sdk_module}}.reducers, args) => promise<unit> = "{{self.accessor}}"
 
-let call = (conn: {{self.sdk_module}}.connection, {{self.call_params}}) =>
-  conn->StdbClient.reducers->{{self.accessor}}({
-{{self.call_body_fields}}
-  })
+let call = (conn: {{self.sdk_module}}.connection, args: args) =>
+  conn->StdbClient.reducers->{{self.accessor}}(args)
 %% if !self.make_functor.is_empty() {
 {{self.make_functor}}
 %% }

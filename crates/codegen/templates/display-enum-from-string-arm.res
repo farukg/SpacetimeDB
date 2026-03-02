@@ -1,0 +1,1 @@
+  | "{{self.constructor}}" => Some({{self.constructor}})
