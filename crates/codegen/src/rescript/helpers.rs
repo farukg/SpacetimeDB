@@ -193,58 +193,88 @@ pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRef
 // Schema AlgebraicType rendering (pre-render boundary — stays in Rust)
 // ---------------------------------------------------------------------------
 
-/// Render a ReScript `AlgType.*` expression for `AlgebraicTypeUse`.
+// ---------------------------------------------------------------------------
+// Schema algebra helpers — compose ReScript algebraicType value expressions
+// ---------------------------------------------------------------------------
+
+/// Wrap elements into a `Compound(Product({value: {elements: [...]}}))` expression.
+fn alg_product(elements: &[String]) -> String {
+    format!("Compound(Product({{value: {{elements: [{}]}}}}))", elements.join(", "))
+}
+
+/// Create a product element `{name: Some("n"), algebraicType: ty}`.
+fn alg_element(name: &str, ty: &str) -> String {
+    format!("{{name: Some(\"{name}\"), algebraicType: {ty}}}")
+}
+
+/// Wrap variants into a `Compound(Sum({value: {variants: [...]}}))` expression.
+fn alg_sum(variants: &[String]) -> String {
+    format!("Compound(Sum({{value: {{variants: [{}]}}}}))", variants.join(", "))
+}
+
+/// Create a sum variant `{name: Some("n"), algebraicType: ty}`.
+fn alg_variant(name: &str, ty: &str) -> String {
+    format!("{{name: Some(\"{name}\"), algebraicType: {ty}}}")
+}
+
+/// Render a ReScript algebraicType value expression for `AlgebraicTypeUse`.
 ///
 /// This produces the BSATN-level algebraicType representation consumed by the
-/// SDK's `ProductType.makeDeserializer`. Unlike `render_res_type` (which renders
-/// ReScript *type expressions*), this renders ReScript *value expressions* that
-/// construct `StdbSdk.algebraicType` values at runtime.
+/// SDK's `ProductType.makeDeserializer`. Uses direct constructors from the
+/// two-tier `@unboxed` + `@tag("tag")` design:
+/// - Primitives: bare constructors like `U8`, `Bool`, `String`
+/// - Compounds: `Compound(Product({value: ...}))`, `Compound(Sum({value: ...}))`, etc.
 ///
 /// Named types (`Ref`) are rendered as camelCase let-binding names (e.g., `accountType`)
 /// because the generated `StdbSchema.res` defines a `let` binding per named type.
 pub fn render_schema_alg_type(module: &ModuleDef, ty: &AlgebraicTypeUse) -> String {
     match ty {
-        AlgebraicTypeUse::Unit => "AlgType.unit_".to_string(),
-        AlgebraicTypeUse::Never => "AlgType.unit_".to_string(),
-        AlgebraicTypeUse::Identity => "AlgType.identity".to_string(),
-        AlgebraicTypeUse::ConnectionId => "AlgType.connectionId".to_string(),
-        AlgebraicTypeUse::Timestamp => "AlgType.timestamp".to_string(),
-        AlgebraicTypeUse::TimeDuration => "AlgType.timeDuration".to_string(),
-        AlgebraicTypeUse::ScheduleAt => "AlgType.scheduleAt".to_string(),
-        AlgebraicTypeUse::Uuid => "AlgType.uuid".to_string(),
-        AlgebraicTypeUse::String => "AlgType.string_".to_string(),
+        AlgebraicTypeUse::Unit => alg_product(&[]),
+        AlgebraicTypeUse::Never => alg_product(&[]),
+        AlgebraicTypeUse::Identity => alg_product(&[alg_element("__identity__", "U256")]),
+        AlgebraicTypeUse::ConnectionId => alg_product(&[alg_element("__connection_id__", "U128")]),
+        AlgebraicTypeUse::Timestamp => alg_product(&[alg_element("__timestamp_micros_since_unix_epoch__", "I64")]),
+        AlgebraicTypeUse::TimeDuration => alg_product(&[alg_element("__time_duration_micros__", "I64")]),
+        AlgebraicTypeUse::ScheduleAt => {
+            let time_duration = alg_product(&[alg_element("__time_duration_micros__", "I64")]);
+            let timestamp = alg_product(&[alg_element("__timestamp_micros_since_unix_epoch__", "I64")]);
+            alg_sum(&[alg_variant("Interval", &time_duration), alg_variant("Time", &timestamp)])
+        }
+        AlgebraicTypeUse::Uuid => alg_product(&[alg_element("__uuid__", "U128")]),
+        AlgebraicTypeUse::String => "String".to_string(),
         AlgebraicTypeUse::Option(inner) => {
             let inner_str = render_schema_alg_type(module, inner);
-            format!("AlgType.option({inner_str})")
+            let none = alg_product(&[]);
+            alg_sum(&[alg_variant("some", &inner_str), alg_variant("none", &none)])
         }
         AlgebraicTypeUse::Result { ok_ty, err_ty } => {
             let ok_str = render_schema_alg_type(module, ok_ty);
             let err_str = render_schema_alg_type(module, err_ty);
-            format!("AlgType.result({ok_str}, {err_str})")
+            alg_sum(&[alg_variant("ok", &ok_str), alg_variant("err", &err_str)])
         }
         AlgebraicTypeUse::Primitive(prim) => match prim {
-            PrimitiveType::Bool => "AlgType.bool_".to_string(),
-            PrimitiveType::I8 => "AlgType.i8".to_string(),
-            PrimitiveType::U8 => "AlgType.u8".to_string(),
-            PrimitiveType::I16 => "AlgType.i16".to_string(),
-            PrimitiveType::U16 => "AlgType.u16".to_string(),
-            PrimitiveType::I32 => "AlgType.i32".to_string(),
-            PrimitiveType::U32 => "AlgType.u32".to_string(),
-            PrimitiveType::I64 => "AlgType.i64".to_string(),
-            PrimitiveType::U64 => "AlgType.u64".to_string(),
-            PrimitiveType::I128 => "AlgType.i128".to_string(),
-            PrimitiveType::U128 => "AlgType.u128".to_string(),
-            PrimitiveType::I256 => "AlgType.i256".to_string(),
-            PrimitiveType::U256 => "AlgType.u256".to_string(),
-            PrimitiveType::F32 => "AlgType.f32".to_string(),
-            PrimitiveType::F64 => "AlgType.f64".to_string(),
+            PrimitiveType::Bool => "Bool".to_string(),
+            PrimitiveType::I8 => "I8".to_string(),
+            PrimitiveType::U8 => "U8".to_string(),
+            PrimitiveType::I16 => "I16".to_string(),
+            PrimitiveType::U16 => "U16".to_string(),
+            PrimitiveType::I32 => "I32".to_string(),
+            PrimitiveType::U32 => "U32".to_string(),
+            PrimitiveType::I64 => "I64".to_string(),
+            PrimitiveType::U64 => "U64".to_string(),
+            PrimitiveType::I128 => "I128".to_string(),
+            PrimitiveType::U128 => "U128".to_string(),
+            PrimitiveType::I256 => "I256".to_string(),
+            PrimitiveType::U256 => "U256".to_string(),
+            PrimitiveType::F32 => "F32".to_string(),
+            PrimitiveType::F64 => "F64".to_string(),
         },
         AlgebraicTypeUse::Array(inner) => {
             if matches!(&**inner, AlgebraicTypeUse::Primitive(PrimitiveType::U8)) {
-                return "AlgType.byteArray".to_string();
+                return format!("Compound(Array({{value: U8}}))");
             }
             let inner_str = render_schema_alg_type(module, inner);
-            format!("AlgType.array_({inner_str})")
+            format!("Compound(Array({{value: {inner_str}}}))")
         }
         AlgebraicTypeUse::Ref(r) => {
             // Reference to a named type — rendered as the let-binding name in StdbSchema.res

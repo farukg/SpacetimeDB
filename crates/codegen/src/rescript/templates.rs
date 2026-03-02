@@ -336,7 +336,7 @@ pub(super) struct StdbDisplayRes<'a> {
 // ===========================================================================
 
 /// A single product element in a schema type builder.
-/// Renders: `AlgType.element(~name="fieldName", ~algebraicType=algTypeExpr),`
+/// Renders: `{name: Some("fieldName"), algebraicType: algTypeExpr},`
 #[derive(Boilerplate)]
 pub(super) struct SchemaProductElementRes<'a> {
     pub field_name: &'a str,
@@ -344,7 +344,7 @@ pub(super) struct SchemaProductElementRes<'a> {
 }
 
 /// A single sum variant in a schema type builder.
-/// Renders: `AlgType.variant(~name="VariantName", ~algebraicType=algTypeExpr),`
+/// Renders: `{name: Some("VariantName"), algebraicType: algTypeExpr},`
 #[derive(Boilerplate)]
 pub(super) struct SchemaVariantElementRes<'a> {
     pub variant_name: &'a str,
@@ -383,7 +383,7 @@ pub(super) struct SchemaConstraintEntryRes<'a> {
 // ===========================================================================
 
 /// A named type binding — product type.
-/// Renders: `let typeName_ = AlgType.product([...elements])`
+/// Renders: `let typeName_ = Compound(Product({value: {elements: [...]}}))`
 #[derive(Boilerplate)]
 pub(super) struct SchemaProductBindingRes<'a> {
     pub binding_name: &'a str,
@@ -391,7 +391,7 @@ pub(super) struct SchemaProductBindingRes<'a> {
 }
 
 /// A named type binding — sum type (tagged union).
-/// Renders: `let typeName_ = AlgType.sum([...variants])`
+/// Renders: `let typeName_ = Compound(Sum({value: {variants: [...]}}))`
 #[derive(Boilerplate)]
 pub(super) struct SchemaSumBindingRes<'a> {
     pub binding_name: &'a str,
@@ -434,13 +434,13 @@ pub(super) struct SchemaProcedureEntryRes<'a> {
 
 /// `StdbSchema.res` — pure ReScript runtime schema (replaces StdbSchema.mjs).
 ///
-/// Constructs `remoteModule` directly using `sdk_module` types and `AlgType.*` constructors.
+/// Constructs `remoteModule` directly using `sdk_module` types and direct algebraicType constructors.
 /// No SDK builder functions — just record literals.
 #[derive(Boilerplate)]
 pub(super) struct StdbSchemaRes<'a> {
     pub header: AutoGenHeaderRes,
     pub cli_version: &'a str,
-    /// Pre-rendered type bindings (let typeName_ = AlgType.product/sum(...))
+    /// Pre-rendered type bindings (let typeName_ = Compound(Product/Sum(...)))
     pub type_bindings: &'a str,
     pub table_entries: Vec<SchemaTableEntryRes<'a>>,
     pub reducer_entries: Vec<SchemaReducerEntryRes<'a>>,

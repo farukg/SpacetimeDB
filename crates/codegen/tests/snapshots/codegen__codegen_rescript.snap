@@ -1,5 +1,6 @@
 ---
 source: crates/codegen/tests/codegen.rs
+assertion_line: 37
 expression: outfiles
 ---
 "Stdb__Async.res" = '''
@@ -139,108 +140,108 @@ open Stdb__Sdk
 
 // ─── Named type algebraicType bindings ──────────────────────────────
 
-let baz_ = AlgType.product([
-    AlgType.element(~name="field", ~algebraicType=AlgType.string_),
+let baz_ = Compound(Product({value: {elements: [
+    {name: Some("field"), algebraicType: String},
 
-])
-let foobar_ = AlgType.sum([
-    AlgType.variant(~name="Baz", ~algebraicType=baz_),
+]}}))
+let foobar_ = Compound(Sum({value: {variants: [
+    {name: Some("Baz"), algebraicType: baz_},
 
-    AlgType.variant(~name="Bar", ~algebraicType=AlgType.unit_),
+    {name: Some("Bar"), algebraicType: Compound(Product({value: {elements: []}}))},
 
-    AlgType.variant(~name="Har", ~algebraicType=AlgType.u32),
+    {name: Some("Har"), algebraicType: U32},
 
-])
-let hasSpecialStuff_ = AlgType.product([
-    AlgType.element(~name="identity", ~algebraicType=AlgType.identity),
+]}}))
+let hasSpecialStuff_ = Compound(Product({value: {elements: [
+    {name: Some("identity"), algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
 
-    AlgType.element(~name="connection_id", ~algebraicType=AlgType.connectionId),
+    {name: Some("connection_id"), algebraicType: Compound(Product({value: {elements: [{name: Some("__connection_id__"), algebraicType: U128}]}}))},
 
-])
-let person_ = AlgType.product([
-    AlgType.element(~name="id", ~algebraicType=AlgType.u32),
+]}}))
+let person_ = Compound(Product({value: {elements: [
+    {name: Some("id"), algebraicType: U32},
 
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
-    AlgType.element(~name="age", ~algebraicType=AlgType.u8),
+    {name: Some("age"), algebraicType: U8},
 
-])
-let pkMultiIdentity_ = AlgType.product([
-    AlgType.element(~name="id", ~algebraicType=AlgType.u32),
+]}}))
+let pkMultiIdentity_ = Compound(Product({value: {elements: [
+    {name: Some("id"), algebraicType: U32},
 
-    AlgType.element(~name="other", ~algebraicType=AlgType.u32),
+    {name: Some("other"), algebraicType: U32},
 
-])
-let player_ = AlgType.product([
-    AlgType.element(~name="identity", ~algebraicType=AlgType.identity),
+]}}))
+let player_ = Compound(Product({value: {elements: [
+    {name: Some("identity"), algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
 
-    AlgType.element(~name="player_id", ~algebraicType=AlgType.u64),
+    {name: Some("player_id"), algebraicType: U64},
 
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
-])
-let point_ = AlgType.product([
-    AlgType.element(~name="x", ~algebraicType=AlgType.i64),
+]}}))
+let point_ = Compound(Product({value: {elements: [
+    {name: Some("x"), algebraicType: I64},
 
-    AlgType.element(~name="y", ~algebraicType=AlgType.i64),
+    {name: Some("y"), algebraicType: I64},
 
-])
-let privateTable_ = AlgType.product([
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+]}}))
+let privateTable_ = Compound(Product({value: {elements: [
+    {name: Some("name"), algebraicType: String},
 
-])
-let removeTable_ = AlgType.product([
-    AlgType.element(~name="id", ~algebraicType=AlgType.u32),
+]}}))
+let removeTable_ = Compound(Product({value: {elements: [
+    {name: Some("id"), algebraicType: U32},
 
-])
-let repeatingTestArg_ = AlgType.product([
-    AlgType.element(~name="scheduled_id", ~algebraicType=AlgType.u64),
+]}}))
+let repeatingTestArg_ = Compound(Product({value: {elements: [
+    {name: Some("scheduled_id"), algebraicType: U64},
 
-    AlgType.element(~name="scheduled_at", ~algebraicType=AlgType.scheduleAt),
+    {name: Some("scheduled_at"), algebraicType: Compound(Sum({value: {variants: [{name: Some("Interval"), algebraicType: Compound(Product({value: {elements: [{name: Some("__time_duration_micros__"), algebraicType: I64}]}}))}, {name: Some("Time"), algebraicType: Compound(Product({value: {elements: [{name: Some("__timestamp_micros_since_unix_epoch__"), algebraicType: I64}]}}))}]}}))},
 
-    AlgType.element(~name="prev_time", ~algebraicType=AlgType.timestamp),
+    {name: Some("prev_time"), algebraicType: Compound(Product({value: {elements: [{name: Some("__timestamp_micros_since_unix_epoch__"), algebraicType: I64}]}}))},
 
-])
-let testA_ = AlgType.product([
-    AlgType.element(~name="x", ~algebraicType=AlgType.u32),
+]}}))
+let testA_ = Compound(Product({value: {elements: [
+    {name: Some("x"), algebraicType: U32},
 
-    AlgType.element(~name="y", ~algebraicType=AlgType.u32),
+    {name: Some("y"), algebraicType: U32},
 
-    AlgType.element(~name="z", ~algebraicType=AlgType.string_),
+    {name: Some("z"), algebraicType: String},
 
-])
-let testB_ = AlgType.product([
-    AlgType.element(~name="foo", ~algebraicType=AlgType.string_),
+]}}))
+let testB_ = Compound(Product({value: {elements: [
+    {name: Some("foo"), algebraicType: String},
 
-])
-let namespaceTestC_ = AlgType.sum([
-    AlgType.variant(~name="Foo", ~algebraicType=AlgType.unit_),
+]}}))
+let namespaceTestC_ = Compound(Sum({value: {variants: [
+    {name: Some("Foo"), algebraicType: Compound(Product({value: {elements: []}}))},
 
-    AlgType.variant(~name="Bar", ~algebraicType=AlgType.unit_),
+    {name: Some("Bar"), algebraicType: Compound(Product({value: {elements: []}}))},
 
-])
-let testD_ = AlgType.product([
-    AlgType.element(~name="test_c", ~algebraicType=AlgType.option(namespaceTestC_)),
+]}}))
+let testD_ = Compound(Product({value: {elements: [
+    {name: Some("test_c"), algebraicType: Compound(Sum({value: {variants: [{name: Some("some"), algebraicType: namespaceTestC_}, {name: Some("none"), algebraicType: Compound(Product({value: {elements: []}}))}]}}))},
 
-])
-let testE_ = AlgType.product([
-    AlgType.element(~name="id", ~algebraicType=AlgType.u64),
+]}}))
+let testE_ = Compound(Product({value: {elements: [
+    {name: Some("id"), algebraicType: U64},
 
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
-])
-let testFoobar_ = AlgType.product([
-    AlgType.element(~name="field", ~algebraicType=foobar_),
+]}}))
+let testFoobar_ = Compound(Product({value: {elements: [
+    {name: Some("field"), algebraicType: foobar_},
 
-])
-let namespaceTestF_ = AlgType.sum([
-    AlgType.variant(~name="Foo", ~algebraicType=AlgType.unit_),
+]}}))
+let namespaceTestF_ = Compound(Sum({value: {variants: [
+    {name: Some("Foo"), algebraicType: Compound(Product({value: {elements: []}}))},
 
-    AlgType.variant(~name="Bar", ~algebraicType=AlgType.unit_),
+    {name: Some("Bar"), algebraicType: Compound(Product({value: {elements: []}}))},
 
-    AlgType.variant(~name="Baz", ~algebraicType=AlgType.string_),
+    {name: Some("Baz"), algebraicType: String},
 
-])
+]}}))
 // ─── Remote module assembly ─────────────────────────────────────────
 
 let remoteModule: remoteModule = {
@@ -253,11 +254,11 @@ let remoteModule: remoteModule = {
         accessorName: "logged_out_player",
         rowType: {
           elements: [
-    AlgType.element(~name="identity", ~algebraicType=AlgType.identity),
+    {name: Some("identity"), algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
 
-    AlgType.element(~name="player_id", ~algebraicType=AlgType.u64),
+    {name: Some("player_id"), algebraicType: U64},
 
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
           ],
         },
@@ -268,7 +269,7 @@ let remoteModule: remoteModule = {
         columnMetadata: {
           isPrimaryKey: true,
         },
-        typeBuilder: {algebraicType: AlgType.identity},
+        typeBuilder: {algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
       },
     ),
 
@@ -277,7 +278,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.u64},
+        typeBuilder: {algebraicType: U64},
       },
     ),
 
@@ -286,7 +287,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.string_},
+        typeBuilder: {algebraicType: String},
       },
     ),
 
@@ -317,11 +318,11 @@ let remoteModule: remoteModule = {
         accessorName: "person",
         rowType: {
           elements: [
-    AlgType.element(~name="id", ~algebraicType=AlgType.u32),
+    {name: Some("id"), algebraicType: U32},
 
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
-    AlgType.element(~name="age", ~algebraicType=AlgType.u8),
+    {name: Some("age"), algebraicType: U8},
 
           ],
         },
@@ -332,7 +333,7 @@ let remoteModule: remoteModule = {
         columnMetadata: {
           isPrimaryKey: true,
         },
-        typeBuilder: {algebraicType: AlgType.u32},
+        typeBuilder: {algebraicType: U32},
       },
     ),
 
@@ -341,7 +342,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.string_},
+        typeBuilder: {algebraicType: String},
       },
     ),
 
@@ -350,7 +351,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.u8},
+        typeBuilder: {algebraicType: U8},
       },
     ),
 
@@ -375,11 +376,11 @@ let remoteModule: remoteModule = {
         accessorName: "player",
         rowType: {
           elements: [
-    AlgType.element(~name="identity", ~algebraicType=AlgType.identity),
+    {name: Some("identity"), algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
 
-    AlgType.element(~name="player_id", ~algebraicType=AlgType.u64),
+    {name: Some("player_id"), algebraicType: U64},
 
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
           ],
         },
@@ -390,7 +391,7 @@ let remoteModule: remoteModule = {
         columnMetadata: {
           isPrimaryKey: true,
         },
-        typeBuilder: {algebraicType: AlgType.identity},
+        typeBuilder: {algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
       },
     ),
 
@@ -399,7 +400,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.u64},
+        typeBuilder: {algebraicType: U64},
       },
     ),
 
@@ -408,7 +409,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.string_},
+        typeBuilder: {algebraicType: String},
       },
     ),
 
@@ -439,7 +440,7 @@ let remoteModule: remoteModule = {
         accessorName: "test_d",
         rowType: {
           elements: [
-    AlgType.element(~name="test_c", ~algebraicType=AlgType.option(namespaceTestC_)),
+    {name: Some("test_c"), algebraicType: Compound(Sum({value: {variants: [{name: Some("some"), algebraicType: namespaceTestC_}, {name: Some("none"), algebraicType: Compound(Product({value: {elements: []}}))}]}}))},
 
           ],
         },
@@ -449,7 +450,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.option(namespaceTestC_)},
+        typeBuilder: {algebraicType: Compound(Sum({value: {variants: [{name: Some("some"), algebraicType: namespaceTestC_}, {name: Some("none"), algebraicType: Compound(Product({value: {elements: []}}))}]}}))},
       },
     ),
 
@@ -468,7 +469,7 @@ let remoteModule: remoteModule = {
         accessorName: "test_f",
         rowType: {
           elements: [
-    AlgType.element(~name="field", ~algebraicType=foobar_),
+    {name: Some("field"), algebraicType: foobar_},
 
           ],
         },
@@ -497,11 +498,11 @@ let remoteModule: remoteModule = {
         accessorName: "my_player",
         rowType: {
           elements: [
-    AlgType.element(~name="identity", ~algebraicType=AlgType.identity),
+    {name: Some("identity"), algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
 
-    AlgType.element(~name="player_id", ~algebraicType=AlgType.u64),
+    {name: Some("player_id"), algebraicType: U64},
 
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
           ],
         },
@@ -511,7 +512,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.identity},
+        typeBuilder: {algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
       },
     ),
 
@@ -520,7 +521,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.u64},
+        typeBuilder: {algebraicType: U64},
       },
     ),
 
@@ -529,7 +530,7 @@ let remoteModule: remoteModule = {
       {
         columnMetadata: {
         },
-        typeBuilder: {algebraicType: AlgType.string_},
+        typeBuilder: {algebraicType: String},
       },
     ),
 
@@ -548,9 +549,9 @@ let remoteModule: remoteModule = {
       accessorName: "add",
       paramsType: {
         elements: [
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
-    AlgType.element(~name="age", ~algebraicType=AlgType.u8),
+    {name: Some("age"), algebraicType: U8},
 
         ],
       },
@@ -561,7 +562,7 @@ let remoteModule: remoteModule = {
       accessorName: "addPlayer",
       paramsType: {
         elements: [
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
         ],
       },
@@ -572,7 +573,7 @@ let remoteModule: remoteModule = {
       accessorName: "addPrivate",
       paramsType: {
         elements: [
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
         ],
       },
@@ -592,7 +593,7 @@ let remoteModule: remoteModule = {
       accessorName: "deletePlayer",
       paramsType: {
         elements: [
-    AlgType.element(~name="id", ~algebraicType=AlgType.u64),
+    {name: Some("id"), algebraicType: U64},
 
         ],
       },
@@ -603,7 +604,7 @@ let remoteModule: remoteModule = {
       accessorName: "deletePlayersByName",
       paramsType: {
         elements: [
-    AlgType.element(~name="name", ~algebraicType=AlgType.string_),
+    {name: Some("name"), algebraicType: String},
 
         ],
       },
@@ -614,7 +615,7 @@ let remoteModule: remoteModule = {
       accessorName: "listOverAge",
       paramsType: {
         elements: [
-    AlgType.element(~name="age", ~algebraicType=AlgType.u8),
+    {name: Some("age"), algebraicType: U8},
 
         ],
       },
@@ -652,13 +653,13 @@ let remoteModule: remoteModule = {
       accessorName: "test",
       paramsType: {
         elements: [
-    AlgType.element(~name="arg", ~algebraicType=testA_),
+    {name: Some("arg"), algebraicType: testA_},
 
-    AlgType.element(~name="arg_2", ~algebraicType=testB_),
+    {name: Some("arg_2"), algebraicType: testB_},
 
-    AlgType.element(~name="arg_3", ~algebraicType=namespaceTestC_),
+    {name: Some("arg_3"), algebraicType: namespaceTestC_},
 
-    AlgType.element(~name="arg_4", ~algebraicType=namespaceTestF_),
+    {name: Some("arg_4"), algebraicType: namespaceTestF_},
 
         ],
       },
@@ -835,6 +836,10 @@ module Baz = {
 type t = {
   @as("field") field: string,
 }
+let make = (v: string): t => { field: v }
+let value = (v: t): string => v.field
+let toKey = (v: t): string => v.field
+let equal = (a: t, b: t): bool => a.field == b.field
 }
 
 module Foobar = {
@@ -888,12 +893,20 @@ module PrivateTable = {
 type t = {
   @as("name") name: string,
 }
+let make = (v: string): t => { name: v }
+let value = (v: t): string => v.name
+let toKey = (v: t): string => v.name
+let equal = (a: t, b: t): bool => a.name == b.name
 }
 
 module RemoveTable = {
 type t = {
   @as("id") id: int,
 }
+let make = (v: int): t => { id: v }
+let value = (v: t): int => v.id
+let toKey = (v: t): string => Int.toString(v.id)
+let equal = (a: t, b: t): bool => a.id == b.id
 }
 
 module RepeatingTestArg = {
@@ -916,6 +929,10 @@ module TestB = {
 type t = {
   @as("foo") foo: string,
 }
+let make = (v: string): t => { foo: v }
+let value = (v: t): string => v.foo
+let toKey = (v: t): string => v.foo
+let equal = (a: t, b: t): bool => a.foo == b.foo
 }
 
 module NamespaceTestC = {
@@ -928,6 +945,9 @@ module TestD = {
 type t = {
   @as("test_c") testC: option<NamespaceTestC.t>,
 }
+let make = (v: option<NamespaceTestC.t>): t => { testC: v }
+let value = (v: t): option<NamespaceTestC.t> => v.testC
+let equal = (a: t, b: t): bool => a.testC == b.testC
 }
 
 module TestE = {
@@ -941,6 +961,9 @@ module TestFoobar = {
 type t = {
   @as("field") field: Foobar.t,
 }
+let make = (v: Foobar.t): t => { field: v }
+let value = (v: t): Foobar.t => v.field
+let equal = (a: t, b: t): bool => a.field == b.field
 }
 
 module NamespaceTestF = {

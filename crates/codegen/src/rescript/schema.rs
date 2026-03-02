@@ -1,8 +1,8 @@
 //! StdbSchema.res — pure ReScript runtime schema for the SpacetimeDB SDK.
 //!
-//! Constructs `remoteModule` directly using `StdbSdk` types and `AlgType.*`
-//! constructors. No SDK builder functions, no CodeIndenter — all output is
-//! composed via boilerplate templates.
+//! Constructs `remoteModule` directly using `StdbSdk` types and direct
+//! algebraicType constructors. No SDK builder functions, no CodeIndenter —
+//! all output is composed via boilerplate templates.
 //!
 //! The generated file:
 //! 1. Opens `StdbSdk` for all types
@@ -118,7 +118,7 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
                         .iter()
                         .map(|variant_name| {
                             let name = rescript_constructor_name(variant_name.deref());
-                            let alg = "AlgType.unit_".to_string();
+                            let alg = "Compound(Product({value: {elements: []}}))".to_string();
                             (name, alg)
                         })
                         .collect();
