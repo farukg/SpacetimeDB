@@ -70,11 +70,7 @@ struct LabelEnumData {
 ///
 /// When `existing_content` is `None`, generates fresh stubs with `"TODO"`.
 /// When `Some`, parses existing content to preserve human-written strings.
-pub fn generate_labels_file(
-    module: &ModuleDef,
-    root_module: &str,
-    existing_content: Option<&str>,
-) -> OutputFile {
+pub fn generate_labels_file(module: &ModuleDef, root_module: &str, existing_content: Option<&str>) -> OutputFile {
     let types: Vec<_> = iter_types(module).collect();
     let typespace = module.typespace_for_generate();
 

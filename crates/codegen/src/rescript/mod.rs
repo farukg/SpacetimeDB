@@ -38,8 +38,8 @@ use helpers::{
 };
 use templates::{
     AutoGenHeaderRes, PkIndexSectionRes, ProcedureFileRes, ReducerMakeFunctorRes, ReducerNoArgsFileRes,
-    ReducerReactHookSectionRes, ReducerServerFileRes, ReducerWithArgsFileRes, StdbAsyncRes,
-    TableEventSectionRes, TableFileRes, TableObserverSectionRes, TableReactHookSectionRes,
+    ReducerReactHookSectionRes, ReducerServerFileRes, ReducerWithArgsFileRes, StdbAsyncRes, TableEventSectionRes,
+    TableFileRes, TableObserverSectionRes, TableReactHookSectionRes,
 };
 
 use convert_case::{Case, Casing};
@@ -66,6 +66,7 @@ impl Lang for ReScript {
         let root_module = &self.root_module;
         let sdk_module = format!("{root_module}__Sdk");
         let react_module = format!("{root_module}__React");
+        let schema_module = format!("{root_module}__Schema");
 
         // Pre-render row record type.
         let row_type = render_record_type(module, "t", &product_def.elements, TypeRefStyle::External, root_module);
@@ -105,19 +106,13 @@ impl Lang for ReScript {
         let has_display = !product_def.elements.is_empty();
 
         // Always emit the typed event union + subscribe.
-        let event_section = TableEventSectionRes {
-            sdk_module: &sdk_module,
-        }
-        .to_string();
+        let event_section = TableEventSectionRes { root_module }.to_string();
 
         // Emit observer functor when async_style ∈ {Observer, All}.
         let observer_section_str;
         let observer_section: &str = match self.async_style {
             AsyncStyle::Observer | AsyncStyle::All => {
-                observer_section_str = TableObserverSectionRes {
-                    sdk_module: &sdk_module,
-                }
-                .to_string();
+                observer_section_str = TableObserverSectionRes { root_module }.to_string();
                 &observer_section_str
             }
             AsyncStyle::Promise => "",
@@ -134,6 +129,7 @@ impl Lang for ReScript {
                     pk_type: pk_type_str,
                     pk_field_camel,
                     has_display,
+                    schema_module: &schema_module,
                 }
                 .to_string();
                 &react_hooks_str
@@ -142,8 +138,7 @@ impl Lang for ReScript {
         };
 
         // Display projection: type display + let toDisplay.
-        let display_section =
-            display_projection::render_display_section(module, &product_def.elements, root_module);
+        let display_section = display_projection::render_display_section(module, &product_def.elements, root_module);
 
         OutputFile {
             filename: format!("{}.res", table_module_name(root_module, &table.accessor_name)),
@@ -156,6 +151,7 @@ impl Lang for ReScript {
                 observer_section,
                 react_hooks,
                 display_section: &display_section,
+                root_module,
                 sdk_module: &sdk_module,
             }
             .to_string(),
@@ -171,6 +167,7 @@ impl Lang for ReScript {
         let root_module = &self.root_module;
         let sdk_module = format!("{root_module}__Sdk");
         let react_module = format!("{root_module}__React");
+        let schema_module = format!("{root_module}__Schema");
 
         if !is_reducer_invokable(reducer) {
             return OutputFile {
@@ -196,6 +193,7 @@ impl Lang for ReScript {
                         params_type: "unit",
                         camel_accessor: &camel_accessor,
                         react_module: &react_module,
+                        schema_module: &schema_module,
                     }
                     .to_string();
                     &react_hooks_str
@@ -208,6 +206,7 @@ impl Lang for ReScript {
                     make_functor_no_args_str = ReducerMakeFunctorRes {
                         accessor: &accessor,
                         has_args: false,
+                        root_module,
                         sdk_module: &sdk_module,
                     }
                     .to_string();
@@ -223,6 +222,7 @@ impl Lang for ReScript {
                     accessor: &accessor,
                     react_hooks,
                     make_functor,
+                    root_module,
                     sdk_module: &sdk_module,
                 }
                 .to_string(),
@@ -239,6 +239,7 @@ impl Lang for ReScript {
                         params_type: "args",
                         camel_accessor: &camel_accessor,
                         react_module: &react_module,
+                        schema_module: &schema_module,
                     }
                     .to_string();
                     &react_hooks_str
@@ -251,6 +252,7 @@ impl Lang for ReScript {
                     make_functor_with_args_str = ReducerMakeFunctorRes {
                         accessor: &accessor,
                         has_args: true,
+                        root_module,
                         sdk_module: &sdk_module,
                     }
                     .to_string();
@@ -267,6 +269,7 @@ impl Lang for ReScript {
                     accessor: &accessor,
                     react_hooks,
                     make_functor,
+                    root_module,
                     sdk_module: &sdk_module,
                 }
                 .to_string(),
@@ -364,6 +367,7 @@ impl Lang for ReScript {
                     header: AutoGenHeaderRes,
                     has_args,
                     reducer_module: &reducer_mod,
+                    root_module,
                     sdk_module: &sdk_module,
                     accessor: &accessor,
                 }

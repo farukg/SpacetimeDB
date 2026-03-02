@@ -69,6 +69,7 @@ pub(super) fn generate_server_reducers_file(
             reducer_type_fields,
             reducer_value_fields,
             has_reducers,
+            root_module,
             sdk_module: &sdk_module,
         }
         .to_string(),

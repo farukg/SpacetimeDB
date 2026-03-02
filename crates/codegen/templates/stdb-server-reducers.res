@@ -8,6 +8,7 @@
 //   })
 //   let result = await ServerReducers.serverReducers.addPlayer({name: "Alice"})
 
+open {{self.root_module}}
 open {{self.sdk_module}}
 
 module type Config = {

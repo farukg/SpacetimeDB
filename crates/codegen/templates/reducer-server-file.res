@@ -1,11 +1,12 @@
 {{self.header}}
+open {{self.root_module}}
 %% if self.has_args {
 
 open {{self.reducer_module}}
 
-let call = async (conn: {{self.sdk_module}}.connection, args: args) => {
+let call = async (conn: Sdk.connection, args: args) => {
   try {
-    await conn->StdbClient.reducers->{{self.accessor}}(args)
+    await conn->Client.reducers->{{self.accessor}}(args)
     Ok()
   } catch {
   | exn => Error(exn)
@@ -13,9 +14,9 @@ let call = async (conn: {{self.sdk_module}}.connection, args: args) => {
 }
 %% } else {
 
-let call = async (conn: {{self.sdk_module}}.connection) => {
+let call = async (conn: Sdk.connection) => {
   try {
-    await conn->StdbClient.reducers->{{self.accessor}}
+    await conn->Client.reducers->{{self.accessor}}
     Ok()
   } catch {
   | exn => Error(exn)

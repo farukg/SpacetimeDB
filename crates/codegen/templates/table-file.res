@@ -1,17 +1,19 @@
 {{self.header}}
 
+open {{self.root_module}}
+
 {{self.row_type}}
-// Opaque table handle — obtained from StdbClient.db
+// Opaque table handle — obtained from Client.db
 type handle
 
 @send external iter: handle => Iterator.t<t> = "iter"
 
-@send external onInsert: (handle, ({{self.sdk_module}}.eventCtx, t) => unit) => unit = "onInsert"
-@send external removeOnInsert: (handle, ({{self.sdk_module}}.eventCtx, t) => unit) => unit = "removeOnInsert"
-@send external onUpdate: (handle, ({{self.sdk_module}}.eventCtx, t, t) => unit) => unit = "onUpdate"
-@send external removeOnUpdate: (handle, ({{self.sdk_module}}.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
-@send external onDelete: (handle, ({{self.sdk_module}}.eventCtx, t) => unit) => unit = "onDelete"
-@send external removeOnDelete: (handle, ({{self.sdk_module}}.eventCtx, t) => unit) => unit = "removeOnDelete"
+@send external onInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "onInsert"
+@send external removeOnInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
+@send external onUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
+@send external removeOnUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
+@send external onDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "onDelete"
+@send external removeOnDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
 
 %% if !self.pk_section.is_empty() {
 {{self.pk_section}}

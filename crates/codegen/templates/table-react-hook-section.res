@@ -1,5 +1,5 @@
 // React hook — typed query binding
-@module("../StdbSchema.res.mjs") @scope("tables") @val
+@module("../{{self.schema_module}}.res.mjs") @scope("tables") @val
 external query: {{self.react_module}}.query<t> = "{{self.accessor}}"
 
 let useRows = () => {{self.react_module}}.useTable(query)

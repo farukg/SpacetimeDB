@@ -1,6 +1,7 @@
 {{self.header}}
-open StdbTypes
-open {{self.sdk_module}}
+open {{self.root_module}}
+open Types
+open Sdk
 
 // ── SDK type helpers ─────────────────────────────────────────────────
 

@@ -5,8 +5,8 @@
 %% }
     let conn = await C.getConnection()
 %% if self.has_args {
-    await conn->StdbClient.reducers->{{self.module}}.{{self.name_camel}}(args)
+    await conn->Client.reducers->{{self.module}}.{{self.name_camel}}(args)
 %% } else {
-    await conn->StdbClient.reducers->{{self.module}}.{{self.name_camel}}
+    await conn->Client.reducers->{{self.module}}.{{self.name_camel}}
 %% }
   }

@@ -46,21 +46,13 @@ enum FieldProjection {
         to_label_expr: String,
     },
     /// Bigint → float.
-    BigintToFloat {
-        convert_expr: String,
-    },
+    BigintToFloat { convert_expr: String },
     /// Timestamp → float.
-    TimestampToFloat {
-        convert_expr: String,
-    },
+    TimestampToFloat { convert_expr: String },
     /// Identity → string.
-    IdentityToString {
-        convert_expr: String,
-    },
+    IdentityToString { convert_expr: String },
     /// ConnectionId → string.
-    ConnectionIdToString {
-        convert_expr: String,
-    },
+    ConnectionIdToString { convert_expr: String },
     /// Option wrapping an inner projection that needs conversion.
     OptionWrapped {
         /// The display type of the inner value.
@@ -69,9 +61,7 @@ enum FieldProjection {
         convert_expr: String,
     },
     /// Pass-through: same type, no conversion.
-    Passthrough {
-        type_str: String,
-    },
+    Passthrough { type_str: String },
 }
 
 /// Owned data for a display field before borrowing for templates.
@@ -252,31 +242,27 @@ fn classify_field(
 
         // Option<T> → recurse into T
         AlgebraicTypeUse::Option(inner) => {
-            let inner_proj =
-                classify_field(module, typespace, inner, "v", root_module, display_module);
+            let inner_proj = classify_field(module, typespace, inner, "v", root_module, display_module);
             match inner_proj {
                 FieldProjection::Passthrough { type_str } => FieldProjection::Passthrough {
                     type_str: format!("option<{type_str}>"),
                 },
-                FieldProjection::BigintToFloat { convert_expr } | FieldProjection::TimestampToFloat { convert_expr } => {
-                    FieldProjection::OptionWrapped {
-                        inner_display_type: "float".to_string(),
-                        convert_expr: format!("{row_access}->Option.map(v => {convert_expr})"),
-                    }
-                }
+                FieldProjection::BigintToFloat { convert_expr }
+                | FieldProjection::TimestampToFloat { convert_expr } => FieldProjection::OptionWrapped {
+                    inner_display_type: "float".to_string(),
+                    convert_expr: format!("{row_access}->Option.map(v => {convert_expr})"),
+                },
                 FieldProjection::IdentityToString { convert_expr }
-                | FieldProjection::ConnectionIdToString { convert_expr } => {
-                    FieldProjection::OptionWrapped {
-                        inner_display_type: "string".to_string(),
-                        convert_expr: format!("{row_access}->Option.map(v => {convert_expr})"),
-                    }
-                }
-                FieldProjection::Newtype { key_type, to_key_expr, .. } => {
-                    FieldProjection::OptionWrapped {
-                        inner_display_type: key_type,
-                        convert_expr: format!("{row_access}->Option.map(v => {to_key_expr})"),
-                    }
-                }
+                | FieldProjection::ConnectionIdToString { convert_expr } => FieldProjection::OptionWrapped {
+                    inner_display_type: "string".to_string(),
+                    convert_expr: format!("{row_access}->Option.map(v => {convert_expr})"),
+                },
+                FieldProjection::Newtype {
+                    key_type, to_key_expr, ..
+                } => FieldProjection::OptionWrapped {
+                    inner_display_type: key_type,
+                    convert_expr: format!("{row_access}->Option.map(v => {to_key_expr})"),
+                },
                 FieldProjection::PlainEnum { enum_type, .. } => FieldProjection::Passthrough {
                     type_str: format!("option<{enum_type}>"),
                 },
@@ -302,7 +288,11 @@ fn classify_field(
                     // Check if toKey exists for this newtype
                     let has_to_key = super::helpers::render_to_key_expr(inner_ty, "unused").is_some();
 
-                    let key_type = if has_to_key { "string".to_string() } else { inner_type_str.clone() };
+                    let key_type = if has_to_key {
+                        "string".to_string()
+                    } else {
+                        inner_type_str.clone()
+                    };
                     let to_key_expr = if has_to_key {
                         format!("{row_access}->{types_module}.{module_name}.toKey")
                     } else {
@@ -326,12 +316,7 @@ fn classify_field(
                 _ => {
                     // Multi-field product or tagged sum → pass through
                     FieldProjection::Passthrough {
-                        type_str: super::helpers::render_res_type(
-                            module,
-                            ty,
-                            TypeRefStyle::External,
-                            root_module,
-                        ),
+                        type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::External, root_module),
                     }
                 }
             }

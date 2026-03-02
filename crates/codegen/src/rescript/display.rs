@@ -9,8 +9,8 @@
 
 use super::helpers::{rescript_constructor_name, rescript_field_name, rescript_module_name};
 use super::templates::{
-    AutoGenHeaderRes, DisplayEnumArmRes, DisplayEnumFromStringArmRes, DisplayEnumFromStringRes,
-    DisplayEnumToStringRes, DisplayUnwrapperRes, StdbDisplayRes,
+    AutoGenHeaderRes, DisplayEnumArmRes, DisplayEnumFromStringArmRes, DisplayEnumFromStringRes, DisplayEnumToStringRes,
+    DisplayUnwrapperRes, StdbDisplayRes,
 };
 use crate::util::{iter_types, type_ref_name};
 use crate::OutputFile;
@@ -134,6 +134,7 @@ pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> Ou
         unwrappers: &unwrappers,
         enum_to_strings: &enum_to_strings,
         enum_from_strings: &enum_from_strings,
+        root_module,
         sdk_module: &sdk_module,
     };
 

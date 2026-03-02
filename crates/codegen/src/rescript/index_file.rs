@@ -123,6 +123,14 @@ pub(super) fn generate_gateway_files(
             target: format!("{root_module}__Client"),
         },
         AliasData {
+            alias: "Sdk".to_string(),
+            target: format!("{root_module}__Sdk"),
+        },
+        AliasData {
+            alias: "Labels".to_string(),
+            target: format!("{root_module}__Labels"),
+        },
+        AliasData {
             alias: "Display".to_string(),
             target: format!("{root_module}__Display"),
         },
@@ -133,6 +141,10 @@ pub(super) fn generate_gateway_files(
         AliasData {
             alias: "Reducers".to_string(),
             target: format!("{root_module}__Reducers"),
+        },
+        AliasData {
+            alias: "ServerReducers".to_string(),
+            target: format!("{root_module}__ServerReducers"),
         },
     ];
 

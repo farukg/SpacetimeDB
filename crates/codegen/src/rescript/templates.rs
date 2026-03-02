@@ -147,6 +147,7 @@ pub(super) struct TableReactHookSectionRes<'a> {
     pub pk_type: &'a str,
     pub pk_field_camel: &'a str,
     pub has_display: bool,
+    pub schema_module: &'a str,
 }
 
 /// React reducer hook section (appears in every reducer file).
@@ -155,6 +156,7 @@ pub(super) struct ReducerReactHookSectionRes<'a> {
     pub params_type: &'a str,
     pub camel_accessor: &'a str,
     pub react_module: &'a str,
+    pub schema_module: &'a str,
 }
 
 /// A single server reducer async wrapper function.
@@ -226,6 +228,7 @@ pub(super) struct TableFileRes<'a> {
     pub react_hooks: &'a str,
     /// Pre-rendered display projection section, or empty string if unit type.
     pub display_section: &'a str,
+    pub root_module: &'a str,
     pub sdk_module: &'a str,
 }
 
@@ -240,6 +243,7 @@ pub(super) struct ReducerWithArgsFileRes<'a> {
     pub react_hooks: &'a str,
     /// Pre-rendered Make functor section, or empty string when async_style = Promise.
     pub make_functor: &'a str,
+    pub root_module: &'a str,
     pub sdk_module: &'a str,
 }
 
@@ -252,6 +256,7 @@ pub(super) struct ReducerNoArgsFileRes<'a> {
     pub react_hooks: &'a str,
     /// Pre-rendered Make functor section, or empty string when async_style = Promise.
     pub make_functor: &'a str,
+    pub root_module: &'a str,
     pub sdk_module: &'a str,
 }
 
@@ -262,6 +267,7 @@ pub(super) struct ReducerServerFileRes<'a> {
     pub header: AutoGenHeaderRes,
     pub has_args: bool,
     pub reducer_module: &'a str,
+    pub root_module: &'a str,
     pub sdk_module: &'a str,
     pub accessor: &'a str,
 }
@@ -295,6 +301,7 @@ pub(super) struct StdbServerReducersRes<'a> {
     pub reducer_type_fields: Vec<ServerReducerTypeFieldRes<'a>>,
     pub reducer_value_fields: Vec<ServerReducerValueFieldRes<'a>>,
     pub has_reducers: bool,
+    pub root_module: &'a str,
     pub sdk_module: &'a str,
 }
 
@@ -359,6 +366,7 @@ pub(super) struct StdbDisplayRes<'a> {
     pub enum_to_strings: &'a str,
     /// Pre-rendered enum fromString functions.
     pub enum_from_strings: &'a str,
+    pub root_module: &'a str,
     pub sdk_module: &'a str,
 }
 
@@ -495,7 +503,7 @@ pub(super) struct StdbAsyncRes;
 /// Contains: type event, let subscribe
 #[derive(Boilerplate)]
 pub(super) struct TableEventSectionRes<'a> {
-    pub sdk_module: &'a str,
+    pub root_module: &'a str,
 }
 
 /// Observer functor section for table files.
@@ -503,7 +511,7 @@ pub(super) struct TableEventSectionRes<'a> {
 /// Contains: module MakeStream with observe + observeWithCtx
 #[derive(Boilerplate)]
 pub(super) struct TableObserverSectionRes<'a> {
-    pub sdk_module: &'a str,
+    pub root_module: &'a str,
 }
 
 /// Make functor section for reducer files (with or without args).
@@ -513,6 +521,7 @@ pub(super) struct TableObserverSectionRes<'a> {
 pub(super) struct ReducerMakeFunctorRes<'a> {
     pub accessor: &'a str,
     pub has_args: bool,
+    pub root_module: &'a str,
     pub sdk_module: &'a str,
 }
 
