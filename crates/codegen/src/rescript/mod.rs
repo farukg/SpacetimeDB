@@ -14,11 +14,13 @@
 //! - `schema` — `StdbSchema.res` generator (ReScript runtime schema)
 //! - `display` — `StdbDisplay.res` generator (unwrappers + toString helpers)
 
+mod bridge;
 mod client;
 pub mod config;
 mod display;
 mod display_projection;
 pub(crate) mod helpers;
+mod hooks;
 mod index_file;
 mod labels;
 mod react;
@@ -367,7 +369,12 @@ impl Lang for ReScript {
             server_reducers::generate_server_reducers_file(module, options, root_module),
             display::generate_display_file(module, root_module),
         ];
-        files.extend(react::generate_react_file(module, root_module));
+        // React/Provider: only emit when async_style ∈ {Promise, All}.
+        // Observer-only mode must never import @spacetimedb/rescript/react
+        // (which calls React.createContext at module init — crashing server-side Node).
+        if self.async_style != AsyncStyle::Observer {
+            files.extend(react::generate_react_file(module, root_module));
+        }
         // Namespace gateways: root, tables, reducers, procedures.
         files.extend(index_file::generate_gateway_files(
             module,
@@ -389,6 +396,8 @@ impl Lang for ReScript {
                 filename: format!("{root_module}__Async.res"),
                 code: StdbAsyncRes.to_string(),
             });
+            files.push(hooks::generate_hooks_file(root_module));
+            files.push(bridge::generate_bridge_file(module, options, root_module));
         }
         // Labels stub: per-PlainEnum translation functions.
         // Read existing labels file to preserve human-written translation strings.

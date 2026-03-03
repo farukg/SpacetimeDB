@@ -8,9 +8,9 @@
 //!
 //! ```toml
 //! root_module = "Stdb"
-//! async_style = "all"        # "promise" | "observer" | "all"
-//! field_naming = "camelCase"  # "camelCase" | "snake_case"
-//! output_dir_strategy = "flat"  # "flat" | "subdirectories"
+//! async_style = "all"              # "promise" | "observer" | "all"
+//! field_naming = "camelCase"        # "camelCase" | "snake_case"
+//! output_dir_strategy = "subdirectories"  # "flat" | "subdirectories"
 //! ```
 
 use crate::AsyncStyle;
@@ -20,9 +20,9 @@ use std::path::Path;
 /// Output directory strategy for generated files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 pub enum OutputDirStrategy {
-    #[default]
     #[serde(rename = "flat")]
     Flat,
+    #[default]
     #[serde(rename = "subdirectories")]
     Subdirectories,
 }
@@ -51,8 +51,8 @@ pub struct RescriptCodegenConfig {
     pub field_naming: FieldNaming,
 
     /// Output directory strategy.
-    /// - `"flat"` (default): all files in output_dir/.
-    /// - `"subdirectories"`: files grouped by namespace level.
+    /// - `"flat"`: all files in output_dir/.
+    /// - `"subdirectories"` (default): files grouped by namespace level.
     pub output_dir_strategy: OutputDirStrategy,
 }
 
@@ -62,24 +62,19 @@ impl Default for RescriptCodegenConfig {
             root_module: "Stdb".to_string(),
             async_style: AsyncStyle::All,
             field_naming: FieldNaming::CamelCase,
-            output_dir_strategy: OutputDirStrategy::Flat,
+            output_dir_strategy: OutputDirStrategy::Subdirectories,
         }
     }
 }
 
 /// Field naming strategy for generated ReScript record types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 pub enum FieldNaming {
+    #[default]
     #[serde(rename = "camelCase")]
     CamelCase,
     #[serde(rename = "snake_case")]
     SnakeCase,
-}
-
-impl Default for FieldNaming {
-    fn default() -> Self {
-        Self::CamelCase
-    }
 }
 
 fn deserialize_async_style<'de, D>(deserializer: D) -> Result<AsyncStyle, D::Error>
@@ -224,9 +219,9 @@ async_style = "promise"
     }
 
     #[test]
-    fn test_default_output_dir_strategy_is_flat() {
+    fn test_default_output_dir_strategy_is_subdirectories() {
         let config = RescriptCodegenConfig::default();
-        assert_eq!(config.output_dir_strategy, OutputDirStrategy::Flat);
+        assert_eq!(config.output_dir_strategy, OutputDirStrategy::Subdirectories);
     }
 
     #[test]

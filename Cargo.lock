@@ -7348,6 +7348,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sigma_rescript_codegen"
+version = "0.1.0"
+dependencies = [
+ "boilerplate",
+ "convert_case 0.6.0",
+ "serde",
+]
+
+[[package]]
 name = "signal-hook"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7824,6 +7833,7 @@ dependencies = [
  "itertools 0.12.1",
  "regex",
  "serde",
+ "sigma_rescript_codegen",
  "spacetimedb-data-structures",
  "spacetimedb-lib 2.0.0",
  "spacetimedb-primitives 2.0.0",

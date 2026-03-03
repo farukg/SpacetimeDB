@@ -38,5 +38,5 @@ declare_tests! {
     test_codegen_csharp => Csharp { namespace: "SpacetimeDB" },
     test_codegen_typescript => TypeScript,
     test_codegen_rust => Rust,
-    test_codegen_rescript => ReScript { async_style: AsyncStyle::All, root_module: "Stdb".to_string(), output_dir_strategy: spacetimedb_codegen::rescript::config::OutputDirStrategy::Flat },
+    test_codegen_rescript => ReScript { async_style: AsyncStyle::All, root_module: "Stdb".to_string(), output_dir_strategy: spacetimedb_codegen::rescript::config::OutputDirStrategy::Flat, out_dir: None },
 }

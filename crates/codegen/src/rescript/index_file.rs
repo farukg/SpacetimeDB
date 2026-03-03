@@ -146,15 +146,20 @@ pub(super) fn generate_gateway_files(
             alias: "ServerReducers".to_string(),
             target: format!("{root_module}__ServerReducers"),
         },
-        AliasData {
+    ];
+
+    // React/Provider: only alias when async_style ∈ {Promise, All}.
+    // Observer-only mode doesn't generate these files.
+    if async_style != AsyncStyle::Observer {
+        root_aliases_data.push(AliasData {
             alias: "React".to_string(),
             target: format!("{root_module}__React"),
-        },
-        AliasData {
+        });
+        root_aliases_data.push(AliasData {
             alias: "Provider".to_string(),
             target: format!("{root_module}__Provider"),
-        },
-    ];
+        });
+    }
 
     if !procedure_data.is_empty() {
         root_aliases_data.push(AliasData {
@@ -167,6 +172,14 @@ pub(super) fn generate_gateway_files(
         root_aliases_data.push(AliasData {
             alias: "Async".to_string(),
             target: format!("{root_module}__Async"),
+        });
+        root_aliases_data.push(AliasData {
+            alias: "Hooks".to_string(),
+            target: format!("{root_module}__Hooks"),
+        });
+        root_aliases_data.push(AliasData {
+            alias: "Bridge".to_string(),
+            target: format!("{root_module}__Bridge"),
         });
     }
 

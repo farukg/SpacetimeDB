@@ -6,9 +6,6 @@
 //! All `render_*` functions return owned `String`s. Type dispatch (`render_res_type`)
 //! stays in Rust; structural composition uses boilerplate templates.
 
-use super::templates::{
-    EnumVariantRes, PlainEnumDeclRes, RecordFieldRes, RecordTypeDeclRes, SumTypeDeclRes, SumVariantRes, UnitTypeDeclRes,
-};
 use crate::util::type_ref_name;
 
 use convert_case::{Case, Casing};
@@ -17,6 +14,9 @@ use spacetimedb_schema::def::ModuleDef;
 use spacetimedb_schema::identifier::Identifier;
 use spacetimedb_schema::type_for_generate::AlgebraicTypeUse;
 use std::ops::Deref;
+
+use sigma_rescript_codegen::names as shared_names;
+use sigma_rescript_codegen::types as shared_types;
 
 /// How to render a reference to another type (`AlgebraicTypeUse::Ref`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,60 +36,19 @@ pub enum TypeRefStyle {
 
 /// Convert a PascalCase type name to a ReScript module name (PascalCase, escaping reserved words).
 pub fn rescript_module_name(name: &str) -> String {
-    // ReScript module names are PascalCase — the input from `type_ref_name()` is already Pascal.
-    // We only need to handle the rare case where a name collides with a built-in.
-    match name {
-        "Array" => "Array_".to_string(),
-        "Option" => "Option_".to_string(),
-        "Result" => "Result_".to_string(),
-        "String" => "String_".to_string(),
-        _ => name.to_string(),
-    }
+    shared_names::rescript_module_name(name)
 }
 
 pub fn rescript_type_name(type_name_pascal: String) -> String {
-    rescript_field_name(type_name_pascal.to_case(Case::Camel))
+    shared_names::rescript_type_name(&type_name_pascal)
 }
 
 pub fn rescript_field_name(name: String) -> String {
-    match name.as_str() {
-        "and" | "assert" | "constraint" | "exception" | "external" | "for" | "if" | "in" | "include" | "let"
-        | "module" | "mutable" | "open" | "private" | "rec" | "switch" | "type" | "when" | "while" => {
-            format!("{name}_")
-        }
-        _ => name,
-    }
+    shared_names::rescript_field_name(&name)
 }
 
 pub fn rescript_constructor_name(name: &str) -> String {
-    // SpacetimeDB's module-def validation layer applies camelCase conversion
-    // to enum variant names before codegen receives them:
-    //   Rust `UG` → `ug`, `AG` → `ag`, `OHG` → `ohg`, `KG` → `kg`
-    //   Rust `GmbH` → `gmbH`, `GbR` → `gbR`
-    //
-    // Heuristic to recover acronyms: short (2-3 char) all-lowercase ASCII-alpha
-    // names are almost certainly acronyms. Uppercase them entirely:
-    //   ug → UG, ag → AG, ohg → OHG, kg → KG
-    //
-    // Mixed-case short names like `gmbH` and `gbR` are NOT all-lowercase,
-    // so they fall through to `to_case(Case::Pascal)` → GmbH, GbR. ✓
-    if name.len() >= 2 && name.len() <= 3 && name.chars().all(|c| c.is_ascii_lowercase()) {
-        return name.to_ascii_uppercase();
-    }
-
-    // If the name is already PascalCase (no underscores, starts with uppercase),
-    // use as-is to preserve mixed casing (e.g. GmbH, GbR).
-    let first_char = name.chars().next();
-    if first_char.is_some_and(|c| c.is_ascii_uppercase()) && !name.contains('_') {
-        return name.to_string();
-    }
-
-    let pascal = name.to_case(Case::Pascal);
-    if pascal.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-        format!("V{pascal}")
-    } else {
-        pascal
-    }
+    shared_names::rescript_constructor_name(name)
 }
 
 pub fn table_module_name(root_module: &str, table_name: &Identifier) -> String {
@@ -301,11 +260,7 @@ pub fn schema_type_binding_name(pascal_name: &str) -> String {
 ///
 /// Each generated file instead declares only the specific sibling aliases it needs.
 pub fn sibling_opens(root_module: &str, siblings: &[&str]) -> String {
-    siblings
-        .iter()
-        .map(|s| format!("module {s} = {root_module}__{s}"))
-        .collect::<Vec<_>>()
-        .join("\n")
+    shared_names::sibling_opens(root_module, siblings)
 }
 
 // ---------------------------------------------------------------------------
@@ -355,13 +310,6 @@ pub fn render_to_key_expr(ty: &AlgebraicTypeUse, field_camel: &str) -> Option<St
 // Record / Sum / Enum type rendering (boilerplate-based, return String)
 // ---------------------------------------------------------------------------
 
-/// Intermediate data for a record field — owns the strings so `RecordFieldRes` can borrow.
-struct RecordFieldData {
-    raw: String,
-    camel: String,
-    type_str: String,
-}
-
 /// Render `type <name> = { @as("raw") camel: T, ... }` (no `rec`).
 pub fn render_record_type(
     module: &ModuleDef,
@@ -384,37 +332,21 @@ pub fn render_record_type_kw(
     style: TypeRefStyle,
     root_module: &str,
 ) -> String {
-    if elements.is_empty() {
-        return UnitTypeDeclRes { keyword, name }.to_string();
-    }
-
-    // Build owned field data, then borrow for template structs.
-    let field_data: Vec<RecordFieldData> = elements
+    let rendered_fields: Vec<(String, String)> = elements
         .iter()
         .map(|(field, ty)| {
             let raw = field.deref().to_string();
-            let camel = rescript_field_name(raw.to_case(Case::Camel));
             let type_str = render_res_type(module, ty, style, root_module);
-            RecordFieldData { raw, camel, type_str }
+            (raw, type_str)
         })
         .collect();
 
-    let fields: Vec<RecordFieldRes> = field_data
+    let field_refs: Vec<(&str, &str)> = rendered_fields
         .iter()
-        .map(|f| RecordFieldRes {
-            raw_name: &f.raw,
-            camel_name: &f.camel,
-            type_str: &f.type_str,
-        })
+        .map(|(raw, type_str)| (raw.as_str(), type_str.as_str()))
         .collect();
 
-    RecordTypeDeclRes { keyword, name, fields }.to_string()
-}
-
-/// Intermediate data for a sum variant.
-struct SumVariantData {
-    constructor: String,
-    payload: String,
+    shared_types::render_record_type(keyword, name, &field_refs)
 }
 
 /// Render a sum type with `@tag("tag")` discrimination.
@@ -428,7 +360,7 @@ pub fn render_sum_type(
     style: TypeRefStyle,
     root_module: &str,
 ) -> String {
-    let variant_data: Vec<SumVariantData> = variants
+    let rendered_variants: Vec<(String, String)> = variants
         .iter()
         .map(|(variant_name, variant_type)| {
             let constructor = rescript_constructor_name(variant_name.deref());
@@ -437,24 +369,16 @@ pub fn render_sum_type(
             } else {
                 render_res_type(module, variant_type, style, root_module)
             };
-            SumVariantData { constructor, payload }
+            (constructor, payload)
         })
         .collect();
 
-    let template_variants: Vec<SumVariantRes> = variant_data
+    let variant_refs: Vec<(&str, &str)> = rendered_variants
         .iter()
-        .map(|v| SumVariantRes {
-            constructor: &v.constructor,
-            payload: &v.payload,
-        })
+        .map(|(constructor, payload)| (constructor.as_str(), payload.as_str()))
         .collect();
 
-    SumTypeDeclRes {
-        keyword,
-        name,
-        variants: template_variants,
-    }
-    .to_string()
+    shared_types::render_sum_type(keyword, name, &variant_refs)
 }
 
 /// Render a plain enum (all-unit variants, no `@tag` needed — compiles to strings).
@@ -462,16 +386,6 @@ pub fn render_sum_type(
 /// Returns the type declaration as a `String` (with trailing newline).
 pub fn render_plain_enum(keyword: &str, name: &str, variants: &[Identifier]) -> String {
     let constructor_names: Vec<String> = variants.iter().map(|v| rescript_constructor_name(v.deref())).collect();
-
-    let template_variants: Vec<EnumVariantRes> = constructor_names
-        .iter()
-        .map(|c| EnumVariantRes { constructor: c })
-        .collect();
-
-    PlainEnumDeclRes {
-        keyword,
-        name,
-        variants: template_variants,
-    }
-    .to_string()
+    let variant_refs: Vec<&str> = constructor_names.iter().map(|v| v.as_str()).collect();
+    shared_types::render_plain_enum(keyword, name, &variant_refs)
 }
