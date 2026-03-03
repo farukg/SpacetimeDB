@@ -146,9 +146,8 @@ pub(super) struct TableReactHookSectionRes<'a> {
     pub has_pk: bool,
     pub pk_type: &'a str,
     pub pk_field_camel: &'a str,
-    pub pk_is_identity: bool,
     pub has_display: bool,
-    /// Relative path to the schema module's  file (e.g. ).
+    /// Relative path to the schema module's `.res.mjs` file (e.g. `./Stdb__Schema`).
     pub schema_module_path: &'a str,
 }
 

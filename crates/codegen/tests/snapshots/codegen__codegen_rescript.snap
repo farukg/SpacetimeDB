@@ -278,7 +278,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<args> = "add"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -314,7 +314,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<args> = "addPlayer"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -367,7 +367,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<args> = "addPrivate"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -433,7 +433,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<unit> = "assertCallerIdentityIsModuleIdentity"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -486,7 +486,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<args> = "deletePlayer"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -539,7 +539,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<args> = "deletePlayersByName"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -592,7 +592,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<args> = "listOverAge"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -641,7 +641,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<unit> = "logModuleIdentity"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -690,7 +690,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<unit> = "queryPrivate"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -739,7 +739,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<unit> = "sayHello"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -795,7 +795,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<args> = "test"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -827,7 +827,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 
 // React hook — typed reducer binding
-@module("../Stdb__Schema.res.mjs") @scope("reducers") @val
+@module("./Stdb__Schema.res.mjs") @scope("reducers") @val
 external reducerDef: React.reducerDef<unit> = "testBtreeIndexArgs"
 
 let useCall = () => React.useMutation(reducerDef)
@@ -1690,7 +1690,7 @@ let toDisplay = (row: t): display => {
 
 
 // React hook — typed query binding
-@module("../Stdb__Schema.res.mjs") @scope("tables") @val
+@module("./Stdb__Schema.res.mjs") @scope("tables") @val
 external query: React.query<t> = "logged_out_player"
 
 let useRows = () => React.useTable(query)
@@ -1809,7 +1809,7 @@ let toDisplay = (row: t): display => {
 
 
 // React hook — typed query binding
-@module("../Stdb__Schema.res.mjs") @scope("tables") @val
+@module("./Stdb__Schema.res.mjs") @scope("tables") @val
 external query: React.query<t> = "my_player"
 
 let useRows = () => React.useTable(query)
@@ -1934,7 +1934,7 @@ let toDisplay = (row: t): display => {
 
 
 // React hook — typed query binding
-@module("../Stdb__Schema.res.mjs") @scope("tables") @val
+@module("./Stdb__Schema.res.mjs") @scope("tables") @val
 external query: React.query<t> = "person"
 
 let useRows = () => React.useTable(query)
@@ -2061,7 +2061,7 @@ let toDisplay = (row: t): display => {
 
 
 // React hook — typed query binding
-@module("../Stdb__Schema.res.mjs") @scope("tables") @val
+@module("./Stdb__Schema.res.mjs") @scope("tables") @val
 external query: React.query<t> = "player"
 
 let useRows = () => React.useTable(query)
@@ -2174,7 +2174,7 @@ let toDisplay = (row: t): display => {
 
 
 // React hook — typed query binding
-@module("../Stdb__Schema.res.mjs") @scope("tables") @val
+@module("./Stdb__Schema.res.mjs") @scope("tables") @val
 external query: React.query<t> = "test_d"
 
 let useRows = () => React.useTable(query)
@@ -2285,7 +2285,7 @@ let toDisplay = (row: t): display => {
 
 
 // React hook — typed query binding
-@module("../Stdb__Schema.res.mjs") @scope("tables") @val
+@module("./Stdb__Schema.res.mjs") @scope("tables") @val
 external query: React.query<t> = "test_f"
 
 let useRows = () => React.useTable(query)

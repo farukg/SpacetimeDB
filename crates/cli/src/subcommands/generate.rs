@@ -533,6 +533,8 @@ pub async fn run_prepared_generate_configs(
                 rescript_lang = ReScript {
                     async_style: rescript_config.async_style,
                     root_module: rescript_config.root_module,
+                    output_dir_strategy: rescript_config.output_dir_strategy,
+                    out_dir: Some(run.out_dir.clone()),
                 };
                 &rescript_lang as &dyn Lang
             }

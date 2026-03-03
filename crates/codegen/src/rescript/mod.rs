@@ -46,10 +46,14 @@ use convert_case::{Case, Casing};
 use spacetimedb_schema::def::{ModuleDef, ProcedureDef, ReducerDef, TableDef};
 use spacetimedb_schema::schema::TableSchema;
 use std::ops::Deref;
+use std::path::PathBuf;
 
 pub struct ReScript {
     pub async_style: AsyncStyle,
     pub root_module: String,
+    pub output_dir_strategy: config::OutputDirStrategy,
+    /// Output directory — used to read existing files for preserving human-written content (e.g. labels).
+    pub out_dir: Option<PathBuf>,
 }
 
 impl Lang for ReScript {
@@ -64,7 +68,10 @@ impl Lang for ReScript {
         let product_def = module.typespace_for_generate()[type_ref].as_product().unwrap();
 
         let root_module = &self.root_module;
-        let schema_module = format!("{root_module}__Schema");
+        let schema_module_path = match self.output_dir_strategy {
+            config::OutputDirStrategy::Flat => format!("./{root_module}__Schema"),
+            config::OutputDirStrategy::Subdirectories => format!("../{root_module}__Schema"),
+        };
 
         // Pre-render row record type.
         let row_type = render_record_type(
@@ -126,13 +133,16 @@ impl Lang for ReScript {
         let react_hooks_str;
         let react_hooks: &str = match self.async_style {
             AsyncStyle::Promise | AsyncStyle::All => {
+                // Detect if PK type is Sdk.identity (opaque JS class requiring identityIsEqual).
+                let pk_is_identity = pk_type_str == "Sdk.identity";
                 react_hooks_str = TableReactHookSectionRes {
                     accessor,
                     has_pk,
                     pk_type: pk_type_str,
                     pk_field_camel,
+                    pk_is_identity,
                     has_display,
-                    schema_module: &schema_module,
+                    schema_module_path: &schema_module_path,
                 }
                 .to_string();
                 &react_hooks_str
@@ -184,7 +194,10 @@ impl Lang for ReScript {
     /// Generates `Stdb[ReducerName]Reducer.res` — one file per reducer.
     fn generate_reducer_file(&self, module: &ModuleDef, reducer: &ReducerDef) -> OutputFile {
         let root_module = &self.root_module;
-        let schema_module = format!("{root_module}__Schema");
+        let schema_module_path = match self.output_dir_strategy {
+            config::OutputDirStrategy::Flat => format!("./{root_module}__Schema"),
+            config::OutputDirStrategy::Subdirectories => format!("../{root_module}__Schema"),
+        };
 
         let accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
         let camel_accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
@@ -202,7 +215,7 @@ impl Lang for ReScript {
                     react_hooks_str = ReducerReactHookSectionRes {
                         params_type: "unit",
                         camel_accessor: &camel_accessor,
-                        schema_module: &schema_module,
+                        schema_module_path: &schema_module_path,
                     }
                     .to_string();
                     &react_hooks_str
@@ -256,7 +269,7 @@ impl Lang for ReScript {
                     react_hooks_str = ReducerReactHookSectionRes {
                         params_type: "args",
                         camel_accessor: &camel_accessor,
-                        schema_module: &schema_module,
+                        schema_module_path: &schema_module_path,
                     }
                     .to_string();
                     &react_hooks_str
@@ -378,7 +391,12 @@ impl Lang for ReScript {
             });
         }
         // Labels stub: per-PlainEnum translation functions.
-        let labels_file = labels::generate_labels_file(module, root_module, None);
+        // Read existing labels file to preserve human-written translation strings.
+        let existing_labels = self.out_dir.as_ref().and_then(|dir| {
+            let labels_path = dir.join(format!("{root_module}__Labels.res"));
+            std::fs::read_to_string(&labels_path).ok()
+        });
+        let labels_file = labels::generate_labels_file(module, root_module, existing_labels.as_deref());
         if !labels_file.code.is_empty() {
             files.push(labels_file);
         }

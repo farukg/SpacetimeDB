@@ -10,11 +10,22 @@
 //! root_module = "Stdb"
 //! async_style = "all"        # "promise" | "observer" | "all"
 //! field_naming = "camelCase"  # "camelCase" | "snake_case"
+//! output_dir_strategy = "flat"  # "flat" | "subdirectories"
 //! ```
 
 use crate::AsyncStyle;
 use serde::Deserialize;
 use std::path::Path;
+
+/// Output directory strategy for generated files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+pub enum OutputDirStrategy {
+    #[default]
+    #[serde(rename = "flat")]
+    Flat,
+    #[serde(rename = "subdirectories")]
+    Subdirectories,
+}
 
 /// ReScript codegen configuration, deserialized from `stdb-codegen.toml`.
 ///
@@ -38,6 +49,11 @@ pub struct RescriptCodegenConfig {
     /// - `"camelCase"` (default): fields use camelCase + `@as("snake_case")`.
     /// - `"snake_case"`: fields use snake_case identifiers, no `@as`.
     pub field_naming: FieldNaming,
+
+    /// Output directory strategy.
+    /// - `"flat"` (default): all files in output_dir/.
+    /// - `"subdirectories"`: files grouped by namespace level.
+    pub output_dir_strategy: OutputDirStrategy,
 }
 
 impl Default for RescriptCodegenConfig {
@@ -46,6 +62,7 @@ impl Default for RescriptCodegenConfig {
             root_module: "Stdb".to_string(),
             async_style: AsyncStyle::All,
             field_naming: FieldNaming::CamelCase,
+            output_dir_strategy: OutputDirStrategy::Flat,
         }
     }
 }
@@ -204,5 +221,32 @@ async_style = "promise"
         std::fs::write(dir2.path().join(CONFIG_FILENAME), r#"root_module = "Second""#).unwrap();
         let config = load_config(&[dir1.path(), dir2.path()]).unwrap();
         assert_eq!(config.root_module, "Second");
+    }
+
+    #[test]
+    fn test_default_output_dir_strategy_is_flat() {
+        let config = RescriptCodegenConfig::default();
+        assert_eq!(config.output_dir_strategy, OutputDirStrategy::Flat);
+    }
+
+    #[test]
+    fn test_parse_output_dir_strategy_flat() {
+        let toml_str = r#"output_dir_strategy = "flat""#;
+        let config: RescriptCodegenConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.output_dir_strategy, OutputDirStrategy::Flat);
+    }
+
+    #[test]
+    fn test_parse_output_dir_strategy_subdirectories() {
+        let toml_str = r#"output_dir_strategy = "subdirectories""#;
+        let config: RescriptCodegenConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.output_dir_strategy, OutputDirStrategy::Subdirectories);
+    }
+
+    #[test]
+    fn test_invalid_output_dir_strategy() {
+        let toml_str = r#"output_dir_strategy = "nested""#;
+        let result: Result<RescriptCodegenConfig, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
     }
 }
