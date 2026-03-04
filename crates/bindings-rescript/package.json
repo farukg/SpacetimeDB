@@ -13,6 +13,7 @@
     },
     "files": [
         "src",
+        "lib",
         "rescript.json"
     ],
     "scripts": {

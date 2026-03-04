@@ -1,1 +1,8 @@
 lib/
+node_modules/
+bun.lock
+*.cmj
+*.cmi
+*.cmt
+*.cmti
+*.ast
