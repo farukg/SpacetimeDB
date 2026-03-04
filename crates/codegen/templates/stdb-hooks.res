@@ -52,6 +52,7 @@ module ConnectionProvider = {
 }
 
 let tokenKey = "stdb_token"
+let identityKey = "stdb_identity"
 
 @val @scope(("globalThis", "localStorage"))
 external _getItem: string => Nullable.t<string> = "getItem"
@@ -79,8 +80,9 @@ module Provider = {
         ->Sdk.withUri(uri)
         ->Sdk.withDatabaseName(moduleName)
         ->Sdk.withToken(savedToken)
-        ->Sdk.onConnect((_conn, _identity, authToken) => {
+        ->Sdk.onConnect((_conn, identityHex, authToken) => {
           _setItem(tokenKey, authToken)
+          _setItem(identityKey, identityHex)
         })
         ->Sdk.onConnectError((_ctx, _error) => {
           switch savedToken {
@@ -188,10 +190,31 @@ let useRows = (config: tableConfig<'row>): array<'row> => {
 
 // ── Reducer mutation hooks ────────────────────────────────────────────────────
 
+// Extract a human-readable message from any JS exception/error value.
+let _exnToMessage: exn => string = %raw(`
+  function(e) {
+    if (e && typeof e.message === 'string') return e.message;
+    if (typeof e === 'string') return e;
+    try { return String(e); } catch(_) { return 'Unknown reducer error'; }
+  }
+`)
+
+// Fire-and-forget: schedule microtask to call the promise error handler.
+// This is the ONLY place the SDK's promise<unit> is consumed — entirely inside
+// the infrastructure boundary, invisible to application code.
+let _fireAndForget: (promise<unit>, exn => unit) => unit = %raw(`
+  function(p, onError) { p.then(undefined, onError); }
+`)
+
+type reducerError = {
+  raw: exn,
+  message: string,
+}
+
 type mutationState<'args> = {
   call: 'args => unit,
   isPending: bool,
-  error: option<exn>,
+  error: option<reducerError>,
 }
 
 let useCallWith = (
@@ -206,17 +229,13 @@ let useCallWith = (
     | Some(c) =>
       setIsPending(_ => true)
       setError(_ => None)
-      callReducer(c, args)
-      ->Promise.then(_ => {
-        setIsPending(_ => false)
-        Promise.resolve()
-      })
-      ->Promise.catch(e => {
-        setIsPending(_ => false)
-        setError(_ => Some(e))
-        Promise.resolve()
-      })
-      ->ignore
+      _fireAndForget(
+        callReducer(c, args),
+        e => {
+          setIsPending(_ => false)
+          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
+        },
+      )
     | None => Console.warn("Hooks.useCallWith: no connection")
     }
   }
@@ -227,7 +246,7 @@ let useCallWith = (
 type mutationStateUnit = {
   call: unit => unit,
   isPending: bool,
-  error: option<exn>,
+  error: option<reducerError>,
 }
 
 let useCallUnit = (
@@ -242,17 +261,13 @@ let useCallUnit = (
     | Some(c) =>
       setIsPending(_ => true)
       setError(_ => None)
-      callReducer(c)
-      ->Promise.then(_ => {
-        setIsPending(_ => false)
-        Promise.resolve()
-      })
-      ->Promise.catch(e => {
-        setIsPending(_ => false)
-        setError(_ => Some(e))
-        Promise.resolve()
-      })
-      ->ignore
+      _fireAndForget(
+        callReducer(c),
+        e => {
+          setIsPending(_ => false)
+          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
+        },
+      )
     | None => Console.warn("Hooks.useCallUnit: no connection")
     }
   }
