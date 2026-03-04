@@ -7,7 +7,7 @@
 //! Field transformation rules:
 //! - **Newtype (single-field product Ref)**: `field: string` (toKey) + `fieldRaw: innerType` (value)
 //! - **PlainEnum Ref**: `field: Enum.t` (preserved) + `fieldLabel: string` (toString)
-//! - **bigint**: `field: float` (BigInt.toFloat)
+//! - **bigint**: `field: bigint` (pass-through, no conversion)
 //! - **Timestamp**: `field: float` (Display.timestamp)
 //! - **Identity**: `field: string` (Display.identity)
 //! - **ConnectionId**: `field: string` (Display.connectionId)
@@ -130,9 +130,11 @@ pub(super) fn render_display_section(
                 });
             }
             FieldProjection::BigintToFloat { convert_expr } => {
+                // Dead arm: no path emits BigintToFloat after Change 1.
+                // Kept for exhaustiveness; emits bigint pass-through for safety.
                 display_fields.push(DisplayFieldData {
                     camel_name: camel,
-                    type_str: "float".to_string(),
+                    type_str: "bigint".to_string(),
                     convert_expr,
                 });
             }
@@ -211,15 +213,15 @@ fn classify_field(
     display_module: &str,
 ) -> FieldProjection {
     match ty {
-        // Bigint primitives → float
+        // Bigint primitives → pass through unchanged (lossless; BigInt.toFloat silently truncates > 2^53)
         AlgebraicTypeUse::Primitive(prim) => match prim {
             PrimitiveType::I64
             | PrimitiveType::U64
             | PrimitiveType::I128
             | PrimitiveType::U128
             | PrimitiveType::I256
-            | PrimitiveType::U256 => FieldProjection::BigintToFloat {
-                convert_expr: format!("{row_access}->BigInt.toFloat"),
+            | PrimitiveType::U256 => FieldProjection::Passthrough {
+                type_str: "bigint".to_string(),
             },
             _ => FieldProjection::Passthrough {
                 type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::ViaGateway, root_module),
@@ -248,8 +250,12 @@ fn classify_field(
                 FieldProjection::Passthrough { type_str } => FieldProjection::Passthrough {
                     type_str: format!("option<{type_str}>"),
                 },
-                FieldProjection::BigintToFloat { convert_expr }
-                | FieldProjection::TimestampToFloat { convert_expr } => FieldProjection::OptionWrapped {
+                // Dead arm: BigintToFloat is never emitted after Change 1.
+                // Kept for exhaustiveness; option<bigint> passes through unchanged.
+                FieldProjection::BigintToFloat { .. } => FieldProjection::Passthrough {
+                    type_str: "option<bigint>".to_string(),
+                },
+                FieldProjection::TimestampToFloat { convert_expr } => FieldProjection::OptionWrapped {
                     inner_display_type: "float".to_string(),
                     convert_expr: format!("{row_access}->Option.map(v => {convert_expr})"),
                 },
