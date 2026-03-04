@@ -11,6 +11,7 @@
 //   module ServerConn = StdbServerConnection.Make(Config)
 //   let conn = await ServerConn.getConnection()
 
+@@warning("-44")
 open Stdb__Sdk
 
 module type Config = {

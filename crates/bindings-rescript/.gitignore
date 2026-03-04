@@ -6,3 +6,4 @@ bun.lock
 *.cmt
 *.cmti
 *.ast
+*.res.mjs
