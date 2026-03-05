@@ -275,6 +275,86 @@ let useCallUnit = (
   {call, isPending, error}
 }
 
+// ── Procedure mutation hooks ──────────────────────────────────────────────────
+
+type procedureState<'args, 'result> = {
+  call: 'args => unit,
+  isPending: bool,
+  error: option<reducerError>,
+  data: option<'result>,
+}
+
+let useCallProcedure = (
+  callProc: (Sdk.connection, 'args) => promise<'result>,
+): procedureState<'args, 'result> => {
+  let conn = useConnection()
+  let (isPending, setIsPending) = useState(false)
+  let (error, setError) = useState(None)
+  let (data, setData) = useState(None)
+
+  let call = args => {
+    switch conn {
+    | Some(c) =>
+      setIsPending(_ => true)
+      setError(_ => None)
+      setData(_ => None)
+      _fireAndForget(
+        callProc(c, args)->Promise.then(result => {
+          setIsPending(_ => false)
+          setData(_ => Some(result))
+          Promise.resolve()
+        }),
+        e => {
+          setIsPending(_ => false)
+          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
+        },
+      )
+    | None => Console.warn("Hooks.useCallProcedure: no connection")
+    }
+  }
+
+  {call, isPending, error, data}
+}
+
+type procedureStateUnit<'result> = {
+  call: unit => unit,
+  isPending: bool,
+  error: option<reducerError>,
+  data: option<'result>,
+}
+
+let useCallProcedureUnit = (
+  callProc: Sdk.connection => promise<'result>,
+): procedureStateUnit<'result> => {
+  let conn = useConnection()
+  let (isPending, setIsPending) = useState(false)
+  let (error, setError) = useState(None)
+  let (data, setData) = useState(None)
+
+  let call = () => {
+    switch conn {
+    | Some(c) =>
+      setIsPending(_ => true)
+      setError(_ => None)
+      setData(_ => None)
+      _fireAndForget(
+        callProc(c)->Promise.then(result => {
+          setIsPending(_ => false)
+          setData(_ => Some(result))
+          Promise.resolve()
+        }),
+        e => {
+          setIsPending(_ => false)
+          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
+        },
+      )
+    | None => Console.warn("Hooks.useCallProcedureUnit: no connection")
+    }
+  }
+
+  {call, isPending, error, data}
+}
+
 // ── Table config constructor ──────────────────────────────────────────────────
 
 external toObj: 'a => Obj.t = "%identity"

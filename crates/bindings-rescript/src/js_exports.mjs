@@ -48,6 +48,12 @@ function normalizeRemoteModule(rm) {
   for (const reducer of rm.reducers) {
     reducer.paramsType = normalizeProductType(reducer.paramsType);
   }
+  for (const procedure of rm.procedures) {
+    procedure.params = normalizeProductType(procedure.params);
+    if (procedure.returnType?.algebraicType) {
+      procedure.returnType.algebraicType = normalizeAlgType(procedure.returnType.algebraicType);
+    }
+  }
   return rm;
 }
 

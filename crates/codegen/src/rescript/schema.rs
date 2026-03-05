@@ -198,9 +198,24 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
 
     // ── Procedure entries ────────────────────────────────────────────
     let procedure_data: Vec<ProcedureEntryData> = iter_procedures(module, options.visibility)
-        .map(|proc| ProcedureEntryData {
-            procedure_name: proc.name.to_string(),
-            accessor_name: proc.accessor_name.deref().to_case(Case::Camel),
+        .map(|proc| {
+            let param_elem_data: Vec<_> = proc
+                .params_for_generate
+                .elements
+                .iter()
+                .map(|(field, field_ty)| {
+                    let name = field.deref().to_string();
+                    let alg = render_schema_alg_type(module, field_ty);
+                    (name, alg)
+                })
+                .collect();
+            let return_type_expr = render_schema_alg_type(module, &proc.return_type_for_generate);
+            ProcedureEntryData {
+                procedure_name: proc.name.to_string(),
+                accessor_name: proc.accessor_name.deref().to_case(Case::Camel),
+                param_elem_data,
+                return_type_expr,
+            }
         })
         .collect();
 
@@ -209,6 +224,15 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
         .map(|d| SchemaProcedureEntryRes {
             procedure_name: &d.procedure_name,
             accessor_name: &d.accessor_name,
+            param_elements: d
+                .param_elem_data
+                .iter()
+                .map(|(name, alg)| SchemaProductElementRes {
+                    field_name: name,
+                    alg_type_expr: alg,
+                })
+                .collect(),
+            return_type_expr: &d.return_type_expr,
         })
         .collect();
 
@@ -304,6 +328,8 @@ struct ReducerEntryData {
 struct ProcedureEntryData {
     procedure_name: String,
     accessor_name: String,
+    param_elem_data: Vec<(String, String)>,
+    return_type_expr: String,
 }
 
 // ---------------------------------------------------------------------------

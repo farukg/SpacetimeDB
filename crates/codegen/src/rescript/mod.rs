@@ -39,9 +39,9 @@ use helpers::{
     sibling_opens, table_module_name, TypeRefStyle,
 };
 use templates::{
-    AutoGenHeaderRes, PkIndexSectionRes, ProcedureFileRes, ReducerMakeFunctorRes, ReducerNoArgsFileRes,
-    ReducerReactHookSectionRes, ReducerServerFileRes, ReducerWithArgsFileRes, StdbAsyncRes, TableEventSectionRes,
-    TableFileRes, TableObserverSectionRes, TableReactHookSectionRes,
+    AutoGenHeaderRes, PkIndexSectionRes, ProcedureFileRes, ProcedureMakeFunctorRes, ReducerMakeFunctorRes,
+    ReducerNoArgsFileRes, ReducerReactHookSectionRes, ReducerServerFileRes, ReducerWithArgsFileRes, StdbAsyncRes,
+    TableEventSectionRes, TableFileRes, TableObserverSectionRes, TableReactHookSectionRes,
 };
 
 use convert_case::{Case, Casing};
@@ -322,11 +322,15 @@ impl Lang for ReScript {
     fn generate_procedure_file(&self, module: &ModuleDef, procedure: &ProcedureDef) -> OutputFile {
         let root_module = &self.root_module;
 
+        let accessor = rescript_field_name(procedure.accessor_name.deref().to_case(Case::Camel));
+        let elements = &procedure.params_for_generate.elements;
+        let has_args = !elements.is_empty();
+
         // Pre-render params record type.
         let params_record = render_record_type(
             module,
             "params",
-            &procedure.params_for_generate.elements,
+            elements,
             TypeRefStyle::ViaGateway,
             root_module,
         );
@@ -339,6 +343,27 @@ impl Lang for ReScript {
             root_module,
         );
 
+        // Pre-render Make functor when async_style ∈ {Observer, All}.
+        let make_functor_str;
+        let make_functor: &str = match self.async_style {
+            AsyncStyle::Observer | AsyncStyle::All => {
+                make_functor_str = ProcedureMakeFunctorRes {
+                    accessor: &accessor,
+                    has_args,
+                }
+                .to_string();
+                &make_functor_str
+            }
+            AsyncStyle::Promise => "",
+        };
+
+        // Build sibling opens: Sdk, Client, Types (+ Async when functor present).
+        let mut siblings: Vec<&str> = vec!["Sdk", "Client", "Types"];
+        if !make_functor.is_empty() {
+            siblings.push("Async");
+        }
+        let sibling_opens = sibling_opens(root_module, &siblings);
+
         OutputFile {
             filename: format!("{}.res", procedure_module_name(root_module, &procedure.accessor_name)),
             code: ProcedureFileRes {
@@ -346,6 +371,10 @@ impl Lang for ReScript {
                 params_record: params_record.trim_end(),
                 result_type: &result_type,
                 procedure_name: &procedure.name,
+                accessor: &accessor,
+                has_args,
+                make_functor,
+                sibling_opens: &sibling_opens,
             }
             .to_string(),
         }

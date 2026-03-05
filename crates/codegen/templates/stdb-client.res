@@ -12,6 +12,7 @@ type db = {
 %% }
 }
 
-// DB and reducers access from connection
+// DB, reducers, and procedures access from connection
 @get external db: {{self.sdk_module}}.connection => db = "db"
 @get external reducers: {{self.sdk_module}}.connection => {{self.sdk_module}}.reducers = "reducers"
+@get external procedures: {{self.sdk_module}}.connection => {{self.sdk_module}}.procedures = "procedures"

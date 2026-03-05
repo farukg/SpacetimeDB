@@ -13,6 +13,7 @@
 type connection
 type eventCtx
 type reducers
+type procedures
 
 // ─── Identity ───────────────────────────────────────────────────────
 
@@ -172,6 +173,8 @@ type reducerDef = {
 type procedureDef = {
   name: string,
   accessorName: string,
+  params: productType<algebraicType>,
+  returnType: typeBuilderLike,
 }
 
 type versionInfo = {cliVersion: string}

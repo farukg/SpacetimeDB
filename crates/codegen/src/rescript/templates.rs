@@ -192,6 +192,21 @@ pub(super) struct ProcedureFileRes<'a> {
     /// Pre-rendered result type expression.
     pub result_type: &'a str,
     pub procedure_name: &'a str,
+    pub accessor: &'a str,
+    pub has_args: bool,
+    /// Pre-rendered Make functor section, or empty string when async_style = Promise.
+    pub make_functor: &'a str,
+    /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
+    pub sibling_opens: &'a str,
+}
+
+/// Make functor section for procedure files (with or without args).
+/// Emitted when async_style ∈ {Observer, All}.
+/// Contains: module Make = (E: Async.EFFECT_RUNTIME) => { let call ... }
+#[derive(Boilerplate)]
+pub(super) struct ProcedureMakeFunctorRes<'a> {
+    pub accessor: &'a str,
+    pub has_args: bool,
 }
 
 /// `StdbTypes.res` preamble — opaque SDK types (emitted before per-type modules).
@@ -371,11 +386,13 @@ pub(super) struct SchemaReducerEntryRes<'a> {
 }
 
 /// A single procedure definition entry.
-/// Renders: `{name: "proc_name", accessorName: "procName"},`
+/// Renders: `{name: "proc_name", accessorName: "procName", params: {...}, returnType: {...}},`
 #[derive(Boilerplate)]
 pub(super) struct SchemaProcedureEntryRes<'a> {
     pub procedure_name: &'a str,
     pub accessor_name: &'a str,
+    pub param_elements: Vec<SchemaProductElementRes<'a>>,
+    pub return_type_expr: &'a str,
 }
 
 // ===========================================================================
