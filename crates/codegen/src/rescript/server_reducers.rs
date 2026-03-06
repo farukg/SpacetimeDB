@@ -61,7 +61,7 @@ pub(super) fn generate_server_reducers_file(
         })
         .collect();
 
-    let opens = sibling_opens(root_module, &["Sdk", "Client", "Reducers"]);
+    let opens = sibling_opens(root_module, &["Sdk", "Reducers"]);
     OutputFile {
         filename: format!("{root_module}__ServerReducers.res"),
         code: StdbServerReducersRes {

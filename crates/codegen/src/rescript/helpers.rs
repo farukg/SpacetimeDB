@@ -307,6 +307,43 @@ pub fn render_to_key_expr(ty: &AlgebraicTypeUse, field_camel: &str) -> Option<St
 }
 
 // ---------------------------------------------------------------------------
+// Equality expression for newtype helpers (W102-safe)
+// ---------------------------------------------------------------------------
+
+/// Compute a W102-safe equality expression for a single-field newtype.
+///
+/// Primitives and string-like types use `===` (physical equality, no W102).
+/// Refs to other newtypes use `ModuleName.equal(a.field, b.field)` (delegates
+/// to that type's own `equal` function, also W102-safe).
+/// Returns `None` for types where a meaningful `equal` doesn't apply
+/// (option, result, array, etc.).
+pub fn render_equal_expr(module: &ModuleDef, ty: &AlgebraicTypeUse, field_camel: &str) -> Option<String> {
+    match ty {
+        // JS primitives — `===` is safe and avoids W102
+        AlgebraicTypeUse::Primitive(_)
+        | AlgebraicTypeUse::String
+        | AlgebraicTypeUse::Identity
+        | AlgebraicTypeUse::ConnectionId
+        | AlgebraicTypeUse::Uuid => Some(format!("a.{field_camel} === b.{field_camel}")),
+        // Ref to another named type — delegate to its `equal` function
+        AlgebraicTypeUse::Ref(reference) => {
+            let pascal_name = type_ref_name(module, *reference);
+            let mod_name = rescript_module_name(&pascal_name);
+            Some(format!("{mod_name}.equal(a.{field_camel}, b.{field_camel})"))
+        }
+        // Complex/unsupported types — no meaningful equality
+        AlgebraicTypeUse::Timestamp
+        | AlgebraicTypeUse::TimeDuration
+        | AlgebraicTypeUse::ScheduleAt
+        | AlgebraicTypeUse::Option(_)
+        | AlgebraicTypeUse::Result { .. }
+        | AlgebraicTypeUse::Array(_)
+        | AlgebraicTypeUse::Unit
+        | AlgebraicTypeUse::Never => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Record / Sum / Enum type rendering (boilerplate-based, return String)
 // ---------------------------------------------------------------------------
 

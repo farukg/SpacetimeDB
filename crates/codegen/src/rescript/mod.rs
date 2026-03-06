@@ -14,6 +14,7 @@
 //! - `schema` — `StdbSchema.res` generator (ReScript runtime schema)
 //! - `display` — `StdbDisplay.res` generator (unwrappers + toString helpers)
 
+mod api;
 mod bridge;
 mod client;
 pub mod config;
@@ -30,7 +31,7 @@ pub(super) mod templates;
 mod topo;
 mod types;
 
-use crate::util::{is_reducer_invokable, iter_reducers};
+use crate::util::{is_reducer_invokable, iter_reducers, iter_table_names_and_types};
 use crate::{AsyncStyle, CodegenOptions, OutputFile};
 
 use super::Lang;
@@ -41,7 +42,8 @@ use helpers::{
 use templates::{
     AutoGenHeaderRes, PkIndexSectionRes, ProcedureFileRes, ProcedureMakeFunctorRes, ReducerMakeFunctorRes,
     ReducerNoArgsFileRes, ReducerReactHookSectionRes, ReducerServerFileRes, ReducerWithArgsFileRes, StdbAsyncRes,
-    TableEventSectionRes, TableFileRes, TableObserverSectionRes, TableReactHookSectionRes,
+    TableEventSectionRes, TableFileRes, TableFunctorFileRes, TableFunctorRes, TableObserverSectionRes,
+    TableReactHookSectionRes,
 };
 
 use convert_case::{Case, Casing};
@@ -54,6 +56,7 @@ pub struct ReScript {
     pub async_style: AsyncStyle,
     pub root_module: String,
     pub output_dir_strategy: config::OutputDirStrategy,
+    pub table_style: config::TableStyle,
     /// Output directory — used to read existing files for preserving human-written content (e.g. labels).
     pub out_dir: Option<PathBuf>,
 }
@@ -118,18 +121,8 @@ impl Lang for ReScript {
         let accessor = table.accessor_name.deref();
         let has_display = !product_def.elements.is_empty();
 
-        // Always emit the typed event union + subscribe.
-        let event_section = TableEventSectionRes.to_string();
-
-        // Emit observer functor when async_style ∈ {Observer, All}.
-        let observer_section_str;
-        let observer_section: &str = match self.async_style {
-            AsyncStyle::Observer | AsyncStyle::All => {
-                observer_section_str = TableObserverSectionRes.to_string();
-                &observer_section_str
-            }
-            AsyncStyle::Promise => "",
-        };
+        // Display projection: type display + let toDisplay.
+        let display_section = display_projection::render_display_section(module, &product_def.elements, root_module);
 
         // Emit React hooks when async_style ∈ {Promise, All}.
         let react_hooks_str;
@@ -152,40 +145,78 @@ impl Lang for ReScript {
             AsyncStyle::Observer => "",
         };
 
-        // Display projection: type display + let toDisplay.
-        let display_section = display_projection::render_display_section(module, &product_def.elements, root_module);
+        match self.table_style {
+            config::TableStyle::Functor => {
+                // Functor mode: thin per-table file with `include TableFunctor.Make(...)`.
+                // Event union, subscribe, and MakeStream come from the shared functor.
+                let mut table_siblings: Vec<&str> = vec!["Sdk", "Types"];
+                if !display_section.is_empty() {
+                    table_siblings.push("Display");
+                }
+                // TableFunctor is needed for the `include`.
+                table_siblings.push("TableFunctor");
+                if !react_hooks.is_empty() {
+                    table_siblings.push("React");
+                }
+                let table_opens = sibling_opens(root_module, &table_siblings);
 
-        // Build sibling opens for this table file.
-        // All table files need Sdk (eventCtx, externals) and Types (row field types).
-        // Display is needed when the table has fields (display_section non-empty).
-        // Async is needed when observer_section is non-empty.
-        // React is needed when react_hooks is non-empty.
-        let mut table_siblings: Vec<&str> = vec!["Sdk", "Types"];
-        if !display_section.is_empty() {
-            table_siblings.push("Display");
-        }
-        if !observer_section.is_empty() {
-            table_siblings.push("Async");
-        }
-        if !react_hooks.is_empty() {
-            table_siblings.push("React");
-        }
-        let table_opens = sibling_opens(root_module, &table_siblings);
-
-        OutputFile {
-            filename: format!("{}.res", table_module_name(root_module, &table.accessor_name)),
-            code: TableFileRes {
-                header: AutoGenHeaderRes,
-                row_type: row_type.trim_end(),
-                pk_section,
-                table_name: &table.name,
-                event_section: &event_section,
-                observer_section,
-                react_hooks,
-                display_section: &display_section,
-                sibling_opens: &table_opens,
+                OutputFile {
+                    filename: format!("{}.res", table_module_name(root_module, &table.accessor_name)),
+                    code: TableFunctorFileRes {
+                        header: AutoGenHeaderRes,
+                        row_type: row_type.trim_end(),
+                        pk_section,
+                        table_name: &table.name,
+                        react_hooks,
+                        display_section: &display_section,
+                        sibling_opens: &table_opens,
+                    }
+                    .to_string(),
+                }
             }
-            .to_string(),
+            config::TableStyle::Inline => {
+                // Inline mode (original behavior): all boilerplate inlined per table file.
+                // Always emit the typed event union + subscribe.
+                let event_section = TableEventSectionRes.to_string();
+
+                // Emit observer functor when async_style ∈ {Observer, All}.
+                let observer_section_str;
+                let observer_section: &str = match self.async_style {
+                    AsyncStyle::Observer | AsyncStyle::All => {
+                        observer_section_str = TableObserverSectionRes.to_string();
+                        &observer_section_str
+                    }
+                    AsyncStyle::Promise => "",
+                };
+
+                let mut table_siblings: Vec<&str> = vec!["Sdk", "Types"];
+                if !display_section.is_empty() {
+                    table_siblings.push("Display");
+                }
+                if !observer_section.is_empty() {
+                    table_siblings.push("Async");
+                }
+                if !react_hooks.is_empty() {
+                    table_siblings.push("React");
+                }
+                let table_opens = sibling_opens(root_module, &table_siblings);
+
+                OutputFile {
+                    filename: format!("{}.res", table_module_name(root_module, &table.accessor_name)),
+                    code: TableFileRes {
+                        header: AutoGenHeaderRes,
+                        row_type: row_type.trim_end(),
+                        pk_section,
+                        table_name: &table.name,
+                        event_section: &event_section,
+                        observer_section,
+                        react_hooks,
+                        display_section: &display_section,
+                        sibling_opens: &table_opens,
+                    }
+                    .to_string(),
+                }
+            }
         }
     }
 
@@ -227,20 +258,16 @@ impl Lang for ReScript {
 
             let make_functor: &str = match self.async_style {
                 AsyncStyle::Observer | AsyncStyle::All => {
-                    make_functor_no_args_str = ReducerMakeFunctorRes {
-                        accessor: &accessor,
-                        has_args: false,
-                    }
-                    .to_string();
+                    make_functor_no_args_str = ReducerMakeFunctorRes { has_args: false }.to_string();
                     &make_functor_no_args_str
                 }
                 AsyncStyle::Promise => "",
             };
 
-            // No-args reducer: needs Sdk (reducers/connection), Client (reducers).
+            // No-args reducer: needs Sdk (connection + opaque reducers).
             // Async is needed when make_functor is non-empty (observer mode).
             // React is needed when react_hooks is non-empty.
-            let mut no_args_siblings: Vec<&str> = vec!["Sdk", "Client"];
+            let mut no_args_siblings: Vec<&str> = vec!["Sdk"];
             if !make_functor.is_empty() {
                 no_args_siblings.push("Async");
             }
@@ -281,21 +308,16 @@ impl Lang for ReScript {
 
             let make_functor: &str = match self.async_style {
                 AsyncStyle::Observer | AsyncStyle::All => {
-                    make_functor_with_args_str = ReducerMakeFunctorRes {
-                        accessor: &accessor,
-                        has_args: true,
-                    }
-                    .to_string();
+                    make_functor_with_args_str = ReducerMakeFunctorRes { has_args: true }.to_string();
                     &make_functor_with_args_str
                 }
                 AsyncStyle::Promise => "",
             };
 
-            // With-args reducer: needs Sdk (reducers/connection), Client (reducers),
-            // Types (args record field types).
+            // With-args reducer: needs Sdk (connection + opaque reducers), Types (args field types).
             // Async is needed when make_functor is non-empty (observer mode).
             // React is needed when react_hooks is non-empty.
-            let mut with_args_siblings: Vec<&str> = vec!["Sdk", "Client", "Types"];
+            let mut with_args_siblings: Vec<&str> = vec!["Sdk", "Types"];
             if !make_functor.is_empty() {
                 with_args_siblings.push("Async");
             }
@@ -327,13 +349,7 @@ impl Lang for ReScript {
         let has_args = !elements.is_empty();
 
         // Pre-render params record type.
-        let params_record = render_record_type(
-            module,
-            "params",
-            elements,
-            TypeRefStyle::ViaGateway,
-            root_module,
-        );
+        let params_record = render_record_type(module, "params", elements, TypeRefStyle::ViaGateway, root_module);
 
         // Pre-render result type expression.
         let result_type = render_res_type(
@@ -347,18 +363,15 @@ impl Lang for ReScript {
         let make_functor_str;
         let make_functor: &str = match self.async_style {
             AsyncStyle::Observer | AsyncStyle::All => {
-                make_functor_str = ProcedureMakeFunctorRes {
-                    accessor: &accessor,
-                    has_args,
-                }
-                .to_string();
+                make_functor_str = ProcedureMakeFunctorRes { has_args }.to_string();
                 &make_functor_str
             }
             AsyncStyle::Promise => "",
         };
 
         // Build sibling opens: Sdk, Client, Types (+ Async when functor present).
-        let mut siblings: Vec<&str> = vec!["Sdk", "Client", "Types"];
+        // Procedure file: needs Sdk (connection + opaque procedures), Types (params/response field types).
+        let mut siblings: Vec<&str> = vec!["Sdk", "Types"];
         if !make_functor.is_empty() {
             siblings.push("Async");
         }
@@ -391,10 +404,18 @@ impl Lang for ReScript {
     /// - {root}__Procedures.res (when procedures exist)
     fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
         let root_module = &self.root_module;
+
+        // Collect table row type refs so Types can skip them (they live in per-table files).
+        let table_row_type_refs: std::collections::HashSet<spacetimedb_lib::sats::AlgebraicTypeRef> =
+            iter_table_names_and_types(module, options.visibility)
+                .map(|(_, _, type_ref)| type_ref)
+                .collect();
+
         let mut files = vec![
-            types::generate_types_file(module, root_module),
+            types::generate_types_file(module, root_module, &table_row_type_refs),
             schema::generate_schema_file(module, options, root_module),
             client::generate_client_file(module, options, root_module),
+            api::generate_api_file(module, options, root_module),
             server_reducers::generate_server_reducers_file(module, options, root_module),
             display::generate_display_file(module, root_module),
         ];
@@ -428,6 +449,24 @@ impl Lang for ReScript {
             files.push(hooks::generate_hooks_file(root_module));
             files.push(bridge::generate_bridge_file(module, options, root_module));
         }
+        // TableFunctor: shared module type + Make functor (only in functor mode).
+        if self.table_style == config::TableStyle::Functor {
+            let has_observer = self.async_style != AsyncStyle::Promise;
+            let mut functor_siblings: Vec<&str> = vec!["Sdk"];
+            if has_observer {
+                functor_siblings.push("Async");
+            }
+            let functor_opens = sibling_opens(root_module, &functor_siblings);
+            files.push(OutputFile {
+                filename: format!("{root_module}__TableFunctor.res"),
+                code: TableFunctorRes {
+                    header: AutoGenHeaderRes,
+                    sibling_opens: functor_opens,
+                    has_observer,
+                }
+                .to_string(),
+            });
+        }
         // Labels stub: per-PlainEnum translation functions.
         // Read existing labels file to preserve human-written translation strings.
         let existing_labels = self.out_dir.as_ref().and_then(|dir| {
@@ -444,11 +483,10 @@ impl Lang for ReScript {
                 continue;
             }
             let has_args = !reducer.params_for_generate.elements.is_empty();
-            let accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
             let reducer_mod_dotted = format!("Reducers.{}", reducer.name.deref().to_case(Case::Pascal));
             let reducer_mod = reducer_module_name(root_module, &reducer.name);
-            // Server file: needs Sdk (connection), Client (reducers), Reducers (for `open Reducers.Foo`).
-            let server_opens = sibling_opens(root_module, &["Sdk", "Client", "Reducers"]);
+            // Server file: needs Sdk (connection + opaque reducers), Reducers (for `open Reducers.Foo`).
+            let server_opens = sibling_opens(root_module, &["Sdk", "Reducers"]);
             files.push(OutputFile {
                 filename: format!("{reducer_mod}__Server.res"),
                 code: ReducerServerFileRes {
@@ -456,7 +494,6 @@ impl Lang for ReScript {
                     has_args,
                     reducer_module: &reducer_mod_dotted,
                     sibling_opens: &server_opens,
-                    accessor: &accessor,
                 }
                 .to_string(),
             });

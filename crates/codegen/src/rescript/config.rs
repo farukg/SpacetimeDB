@@ -11,6 +11,7 @@
 //! async_style = "all"              # "promise" | "observer" | "all"
 //! field_naming = "camelCase"        # "camelCase" | "snake_case"
 //! output_dir_strategy = "subdirectories"  # "flat" | "subdirectories"
+//! table_style = "inline"           # "inline" | "functor"
 //! ```
 
 use crate::AsyncStyle;
@@ -25,6 +26,18 @@ pub enum OutputDirStrategy {
     #[default]
     #[serde(rename = "subdirectories")]
     Subdirectories,
+}
+
+/// Table file generation style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+pub enum TableStyle {
+    /// Current behavior: all boilerplate inlined per table file.
+    #[default]
+    #[serde(rename = "inline")]
+    Inline,
+    /// Generic functor: shared `Stdb__TableFunctor.res` + thin per-table config modules.
+    #[serde(rename = "functor")]
+    Functor,
 }
 
 /// ReScript codegen configuration, deserialized from `stdb-codegen.toml`.
@@ -54,6 +67,11 @@ pub struct RescriptCodegenConfig {
     /// - `"flat"`: all files in output_dir/.
     /// - `"subdirectories"` (default): files grouped by namespace level.
     pub output_dir_strategy: OutputDirStrategy,
+
+    /// Table file generation style.
+    /// - `"inline"` (default): all boilerplate inlined per table file.
+    /// - `"functor"`: generic `Stdb__TableFunctor.res` + thin per-table config modules.
+    pub table_style: TableStyle,
 }
 
 impl Default for RescriptCodegenConfig {
@@ -63,6 +81,7 @@ impl Default for RescriptCodegenConfig {
             async_style: AsyncStyle::All,
             field_naming: FieldNaming::CamelCase,
             output_dir_strategy: OutputDirStrategy::Subdirectories,
+            table_style: TableStyle::Inline,
         }
     }
 }

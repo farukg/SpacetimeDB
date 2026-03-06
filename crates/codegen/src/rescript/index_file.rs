@@ -123,6 +123,10 @@ pub(super) fn generate_gateway_files(
             target: format!("{root_module}__Client"),
         },
         AliasData {
+            alias: "Api".to_string(),
+            target: format!("{root_module}__Api"),
+        },
+        AliasData {
             alias: "Sdk".to_string(),
             target: format!("{root_module}__Sdk"),
         },

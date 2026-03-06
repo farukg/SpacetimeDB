@@ -35,11 +35,17 @@ fn parse_existing(content: &str) -> HashMap<String, HashMap<String, String>> {
             continue;
         }
 
-        // Detect switch arm: `| VariantName => "string value"`
+        // Detect switch arm: `| VariantName => "string value"` or `| VariantName(_) => "string value"`
         if let Some(rest) = trimmed.strip_prefix("| ") {
             if let Some(fn_name) = &current_fn {
                 if let Some(arrow_pos) = rest.find(" => \"") {
-                    let variant = rest[..arrow_pos].trim().to_string();
+                    let variant_raw = rest[..arrow_pos].trim();
+                    // Strip wildcard payload pattern: `Constructor(_)` → `Constructor`
+                    let variant = if let Some(stripped) = variant_raw.strip_suffix("(_)") {
+                        stripped.to_string()
+                    } else {
+                        variant_raw.to_string()
+                    };
                     let after_arrow = &rest[arrow_pos + 5..]; // skip ` => "`
                     if let Some(end_quote) = after_arrow.rfind('"') {
                         let value = after_arrow[..end_quote].to_string();
@@ -59,11 +65,14 @@ fn parse_existing(content: &str) -> HashMap<String, HashMap<String, String>> {
     result
 }
 
-/// Intermediate data for a PlainEnum.
+/// Intermediate data for a PlainEnum or Sum type.
 struct LabelEnumData {
     fn_name: String,
     module_name: String,
     constructors: Vec<String>,
+    /// For Sum types: which constructors carry payloads (for wildcard pattern generation).
+    /// For PlainEnum: all `false`.
+    payload_constructors: Vec<bool>,
 }
 
 /// Generate `{root}__Labels.res` with optional diff-based merge.
@@ -74,11 +83,11 @@ pub fn generate_labels_file(module: &ModuleDef, root_module: &str, existing_cont
     let types: Vec<_> = iter_types(module).collect();
     let typespace = module.typespace_for_generate();
 
-    // Collect PlainEnum data (same pattern as display.rs).
+    // Collect PlainEnum and Sum data for label generation.
     let enum_data: Vec<LabelEnumData> = types
         .iter()
-        .filter_map(|typ| {
-            if let AlgebraicTypeDef::PlainEnum(plain_enum) = &typespace[typ.ty] {
+        .filter_map(|typ| match &typespace[typ.ty] {
+            AlgebraicTypeDef::PlainEnum(plain_enum) => {
                 let pascal = type_ref_name(module, typ.ty);
                 let module_name = rescript_module_name(&pascal);
                 let fn_name = format!("{}Label", pascal.to_case(Case::Camel));
@@ -87,13 +96,36 @@ pub fn generate_labels_file(module: &ModuleDef, root_module: &str, existing_cont
                     .iter()
                     .map(|v| rescript_constructor_name(v.deref()))
                     .collect();
-                return Some(LabelEnumData {
+                let payload_constructors = vec![false; constructors.len()];
+                Some(LabelEnumData {
                     fn_name,
                     module_name,
                     constructors,
-                });
+                    payload_constructors,
+                })
             }
-            None
+            AlgebraicTypeDef::Sum(sum) => {
+                let pascal = type_ref_name(module, typ.ty);
+                let module_name = rescript_module_name(&pascal);
+                let fn_name = format!("{}Label", pascal.to_case(Case::Camel));
+                let mut constructors = Vec::new();
+                let mut payload_constructors = Vec::new();
+                for (name, variant_ty) in sum.variants.iter() {
+                    constructors.push(rescript_constructor_name(name.deref()));
+                    let is_payload = !matches!(
+                        variant_ty,
+                        spacetimedb_schema::type_for_generate::AlgebraicTypeUse::Unit
+                    );
+                    payload_constructors.push(is_payload);
+                }
+                Some(LabelEnumData {
+                    fn_name,
+                    module_name,
+                    constructors,
+                    payload_constructors,
+                })
+            }
+            _ => None,
         })
         .collect();
 
@@ -136,12 +168,17 @@ pub fn generate_labels_file(module: &ModuleDef, root_module: &str, existing_cont
         )
         .unwrap();
 
-        for constructor in &data.constructors {
+        for (i, constructor) in data.constructors.iter().enumerate() {
             let value = existing_map
                 .and_then(|m| m.get(constructor.as_str()))
                 .map(|s| s.as_str())
                 .unwrap_or("TODO");
-            writeln!(code, "    | {constructor} => \"{value}\"").unwrap();
+            let pattern = if data.payload_constructors[i] {
+                format!("{constructor}(_)")
+            } else {
+                constructor.to_string()
+            };
+            writeln!(code, "    | {pattern} => \"{value}\"").unwrap();
         }
 
         writeln!(code, "    }}").unwrap();

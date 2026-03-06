@@ -9,7 +9,7 @@
 //!   with public `module A = { type t = Recursive_N.a }` and `module B = { type t = Recursive_N.b }`.
 
 use super::helpers::{
-    render_plain_enum, render_record_type_kw, render_res_type, render_sum_type, render_to_key_expr,
+    render_equal_expr, render_plain_enum, render_record_type_kw, render_res_type, render_sum_type, render_to_key_expr,
     rescript_field_name, rescript_module_name, rescript_type_name, TypeRefStyle,
 };
 use super::templates::{
@@ -19,14 +19,28 @@ use super::topo::{topological_groups, TypeGroup};
 use crate::util::{iter_types, type_ref_name};
 use crate::OutputFile;
 
+use spacetimedb_lib::sats::AlgebraicTypeRef;
 use spacetimedb_schema::def::ModuleDef;
 use spacetimedb_schema::type_for_generate::AlgebraicTypeDef;
 
 use convert_case::{Case, Casing};
+use std::collections::HashSet;
 use std::fmt::Write;
 use std::ops::Deref;
 
-pub fn generate_types_file(module: &ModuleDef, root_module: &str) -> OutputFile {
+/// Generate `{root}__Types.res`.
+///
+/// Type refs in `table_row_type_refs` are **skipped** — their canonical
+/// definition lives in the per-table file under `{root}__Tables__X.res`.
+/// Consumers should reference table row types via `Tables.X.t` instead of
+/// `Types.X.t`.  Single-field products (newtypes) are kept even when they
+/// are table rows, because their `make`/`value`/`toKey`/`equal` helpers are
+/// only emitted here.
+pub fn generate_types_file(
+    module: &ModuleDef,
+    root_module: &str,
+    table_row_type_refs: &HashSet<AlgebraicTypeRef>,
+) -> OutputFile {
     let mut code = String::new();
     let sdk_module = format!("{root_module}__Sdk");
 
@@ -59,7 +73,7 @@ pub fn generate_types_file(module: &ModuleDef, root_module: &str) -> OutputFile 
 
     for group in &groups {
         match group {
-            TypeGroup::Standalone(r) => emit_standalone(module, &mut code, *r, root_module),
+            TypeGroup::Standalone(r) => emit_standalone(module, &mut code, *r, root_module, table_row_type_refs),
             TypeGroup::SelfRecursive(r) => emit_self_recursive(module, &mut code, *r, root_module),
             TypeGroup::MutuallyRecursive(refs) => {
                 recursive_group_id += 1;
@@ -86,10 +100,22 @@ fn emit_standalone(
     code: &mut String,
     r: spacetimedb_lib::sats::AlgebraicTypeRef,
     root_module: &str,
+    table_row_type_refs: &HashSet<AlgebraicTypeRef>,
 ) {
+    let typespace = module.typespace_for_generate();
+
+    // Skip table row types — their canonical definition lives in the per-table file.
+    // Exception: single-field products (newtypes) are kept because their
+    // make/value/toKey/equal helpers are only emitted in Types.
+    if table_row_type_refs.contains(&r) {
+        let is_newtype = matches!(&typespace[r], AlgebraicTypeDef::Product(p) if p.elements.len() == 1);
+        if !is_newtype {
+            return;
+        }
+    }
+
     let pascal = type_ref_name(module, r);
     let mod_name = rescript_module_name(&pascal);
-    let typespace = module.typespace_for_generate();
 
     let type_decl = match &typespace[r] {
         AlgebraicTypeDef::Product(product) => render_record_type_kw(
@@ -119,11 +145,14 @@ fn emit_standalone(
             let inner_type = render_res_type(module, field_ty, TypeRefStyle::InTypesFile, root_module);
             let to_key = render_to_key_expr(field_ty, &field_camel);
             let to_key_ref = to_key.as_deref();
+            let equal = render_equal_expr(module, field_ty, &field_camel);
+            let equal_ref = equal.as_deref();
             Some(
                 NewtypeHelpersRes {
                     field_camel: &field_camel,
                     inner_type: &inner_type,
                     to_key_expr: to_key_ref,
+                    equal_expr: equal_ref,
                 }
                 .to_string(),
             )

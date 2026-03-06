@@ -5,7 +5,7 @@ module Reducer = {{self.reducer_module}}
 
 let call = async (conn: Sdk.connection, args: Reducer.args) => {
   try {
-    await conn->Client.reducers->Reducer.{{self.accessor}}(args)
+    await conn->Sdk.getReducers->Reducer.call_(args)
     Ok()
   } catch {
   | exn => Error(exn)
@@ -15,7 +15,7 @@ let call = async (conn: Sdk.connection, args: Reducer.args) => {
 
 let call = async (conn: Sdk.connection) => {
   try {
-    await conn->Client.reducers->Reducer.{{self.accessor}}
+    await conn->Sdk.getReducers->Reducer.call_
     Ok()
   } catch {
   | exn => Error(exn)

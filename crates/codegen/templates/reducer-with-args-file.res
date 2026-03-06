@@ -2,10 +2,10 @@
 {{self.sibling_opens}}
 
 {{self.args_record}}
-@send external {{self.accessor}}: (Sdk.reducers, args) => promise<unit> = "{{self.accessor}}"
 
-let call = (conn: Sdk.connection, args: args) =>
-  conn->Client.reducers->{{self.accessor}}(args)
+@send external call_: (Sdk.reducers, args) => promise<unit> = "{{self.accessor}}"
+let call = (conn: Sdk.connection, args: args): promise<unit> =>
+  conn->Sdk.getReducers->call_(args)
 %% if !self.make_functor.is_empty() {
 {{self.make_functor}}
 %% }

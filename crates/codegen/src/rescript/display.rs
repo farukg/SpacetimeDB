@@ -10,14 +10,14 @@
 use super::helpers::{rescript_constructor_name, rescript_field_name, rescript_module_name, sibling_opens};
 use super::templates::{
     AutoGenHeaderRes, DisplayEnumArmRes, DisplayEnumFromStringArmRes, DisplayEnumFromStringRes, DisplayEnumToStringRes,
-    DisplayUnwrapperRes, StdbDisplayRes,
+    DisplaySumPayloadArmRes, DisplaySumToStringRes, DisplaySumUnitArmRes, DisplayUnwrapperRes, StdbDisplayRes,
 };
 use crate::util::{iter_types, type_ref_name};
 use crate::OutputFile;
 
 use convert_case::{Case, Casing};
 use spacetimedb_schema::def::ModuleDef;
-use spacetimedb_schema::type_for_generate::AlgebraicTypeDef;
+use spacetimedb_schema::type_for_generate::{AlgebraicTypeDef, AlgebraicTypeUse};
 use std::ops::Deref;
 
 pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> OutputFile {
@@ -101,7 +101,10 @@ pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> Ou
         let to_arms: Vec<DisplayEnumArmRes> = data
             .constructors
             .iter()
-            .map(|c| DisplayEnumArmRes { constructor: c })
+            .map(|c| DisplayEnumArmRes {
+                module_name: &data.module_name,
+                constructor: c,
+            })
             .collect();
         enum_to_strings.push_str(
             &DisplayEnumToStringRes {
@@ -116,7 +119,10 @@ pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> Ou
         let from_arms: Vec<DisplayEnumFromStringArmRes> = data
             .constructors
             .iter()
-            .map(|c| DisplayEnumFromStringArmRes { constructor: c })
+            .map(|c| DisplayEnumFromStringArmRes {
+                module_name: &data.module_name,
+                constructor: c,
+            })
             .collect();
         enum_from_strings.push_str(
             &DisplayEnumFromStringRes {
@@ -128,17 +134,154 @@ pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> Ou
         );
     }
 
+    // ── Sum enum toString functions ─────────────────────────────────────
+    //
+    // Sum types (payload-carrying enums). Unit variants get simple string arms,
+    // payload variants project the payload via its own toString or generic conversion.
+    // No fromString is generated for Sum types (AD-037: ambiguous reconstruction).
+
+    struct SumVariantData {
+        constructor: String,
+        /// None = unit variant, Some(payload_type) = payload variant
+        payload_type: Option<AlgebraicTypeUse>,
+    }
+
+    struct SumEnumData {
+        fn_name: String,
+        module_name: String,
+        variants: Vec<SumVariantData>,
+    }
+
+    let sum_data: Vec<SumEnumData> = types
+        .iter()
+        .filter_map(|typ| {
+            if let AlgebraicTypeDef::Sum(sum) = &typespace[typ.ty] {
+                let pascal = type_ref_name(module, typ.ty);
+                let module_name = rescript_module_name(&pascal);
+                let fn_name = format!("{}ToString", pascal.to_case(Case::Camel));
+                let variants: Vec<SumVariantData> = sum
+                    .variants
+                    .iter()
+                    .map(|(name, variant_ty)| {
+                        let constructor = rescript_constructor_name(name.deref());
+                        let payload_type = if matches!(variant_ty, AlgebraicTypeUse::Unit) {
+                            None
+                        } else {
+                            Some(variant_ty.clone())
+                        };
+                        SumVariantData {
+                            constructor,
+                            payload_type,
+                        }
+                    })
+                    .collect();
+                return Some(SumEnumData {
+                    fn_name,
+                    module_name,
+                    variants,
+                });
+            }
+            None
+        })
+        .collect();
+
+    let mut sum_to_strings = String::new();
+    for data in &sum_data {
+        // Pre-render each arm as a string since they're heterogeneous (unit vs payload).
+        let arm_strings: Vec<String> = data
+            .variants
+            .iter()
+            .map(|v| match &v.payload_type {
+                None => DisplaySumUnitArmRes {
+                    module_name: &data.module_name,
+                    constructor: &v.constructor,
+                }
+                .to_string(),
+                Some(payload_ty) => {
+                    let payload_expr = render_payload_to_string(module, &typespace, payload_ty);
+                    DisplaySumPayloadArmRes {
+                        module_name: &data.module_name,
+                        constructor: &v.constructor,
+                        payload_expr: &payload_expr,
+                    }
+                    .to_string()
+                }
+            })
+            .collect();
+        let arm_refs: Vec<&str> = arm_strings.iter().map(|s| s.as_str()).collect();
+        sum_to_strings.push_str(
+            &DisplaySumToStringRes {
+                fn_name: &data.fn_name,
+                module_name: &data.module_name,
+                arms: arm_refs,
+            }
+            .to_string(),
+        );
+    }
+
     let opens = sibling_opens(root_module, &["Types", "Sdk"]);
     let display = StdbDisplayRes {
         header: AutoGenHeaderRes,
         unwrappers: &unwrappers,
         enum_to_strings: &enum_to_strings,
         enum_from_strings: &enum_from_strings,
+        sum_to_strings: &sum_to_strings,
         sibling_opens: &opens,
     };
 
     OutputFile {
         filename: format!("{root_module}__Display.res"),
         code: display.to_string(),
+    }
+}
+
+/// Determine how to convert a Sum variant's payload to a string representation.
+///
+/// Returns a ReScript expression that converts the bound `payload` variable to string.
+fn render_payload_to_string(
+    module: &ModuleDef,
+    typespace: &spacetimedb_schema::type_for_generate::TypespaceForGenerate,
+    payload_ty: &AlgebraicTypeUse,
+) -> String {
+    match payload_ty {
+        AlgebraicTypeUse::String => "payload".to_string(),
+        AlgebraicTypeUse::Primitive(prim) => {
+            use spacetimedb_lib::sats::layout::PrimitiveType;
+            match prim {
+                PrimitiveType::Bool => "string_of_bool(payload)".to_string(),
+                PrimitiveType::I8
+                | PrimitiveType::U8
+                | PrimitiveType::I16
+                | PrimitiveType::U16
+                | PrimitiveType::I32
+                | PrimitiveType::U32 => "Int.toString(payload)".to_string(),
+                PrimitiveType::I64
+                | PrimitiveType::U64
+                | PrimitiveType::I128
+                | PrimitiveType::U128
+                | PrimitiveType::I256
+                | PrimitiveType::U256 => "BigInt.toString(payload)".to_string(),
+                PrimitiveType::F32 | PrimitiveType::F64 => "Float.toString(payload)".to_string(),
+            }
+        }
+        AlgebraicTypeUse::Ref(reference) => {
+            let pascal_name = type_ref_name(module, *reference);
+            match &typespace[*reference] {
+                // Payload is another PlainEnum → use its toString
+                AlgebraicTypeDef::PlainEnum(_) => {
+                    let fn_name = format!("{}ToString", pascal_name.to_case(Case::Camel));
+                    format!("{fn_name}(payload)")
+                }
+                // Payload is another Sum → use its toString (recursive)
+                AlgebraicTypeDef::Sum(_) => {
+                    let fn_name = format!("{}ToString", pascal_name.to_case(Case::Camel));
+                    format!("{fn_name}(payload)")
+                }
+                // Payload is a Product (struct) → use JSON.stringifyAny as fallback
+                AlgebraicTypeDef::Product(_) => r#"JSON.stringifyAny(payload)->Option.getOr("<opaque>")"#.to_string(),
+            }
+        }
+        // Fallback for other types
+        _ => r#"JSON.stringifyAny(payload)->Option.getOr("<opaque>")"#.to_string(),
     }
 }

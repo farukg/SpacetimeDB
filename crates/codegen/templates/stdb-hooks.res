@@ -16,10 +16,13 @@ module Client = {{self.root_module}}__Client
 module Schema = {{self.root_module}}__Schema
 
 // ── Minimal React bindings ────────────────────────────────────────────────────
+// getServerSnapshot is required for SSR — without it React throws
+// "Missing getServerSnapshot" during server rendering.
 @module("react")
 external useSyncExternalStore: (
   (unit => unit) => unit => unit,
   unit => 'a,
+  ~getServerSnapshot: unit => 'a=?,
 ) => 'a = "useSyncExternalStore"
 
 @module("react")
@@ -29,8 +32,9 @@ type reactRef<'a> = {mutable current: 'a}
 @module("react")
 external useRef: 'a => reactRef<'a> = "useRef"
 
+// Mount-only effect: passes [] as deps so it runs once, not every render.
 @module("react")
-external useEffect0: (unit => option<unit => unit>) => unit = "useEffect"
+external useEffectOnMount: (unit => option<unit => unit>, @as(json`[]`) _) => unit = "useEffect"
 
 @module("react")
 external useMemo0: (unit => 'a) => 'a = "useMemo"
@@ -71,7 +75,7 @@ module Provider = {
       listeners: [],
     }: connectionStore))
 
-    useEffect0(() => {
+    useEffectOnMount(() => {
       let savedToken = _getItem(tokenKey)->Nullable.toOption
       let builder =
         Sdk.makeDbConnectionBuilder(Schema.remoteModule, config =>
@@ -118,7 +122,7 @@ let useConnection = (): option<Sdk.connection> => {
     }
   }
   let getSnapshot = () => store.conn
-  useSyncExternalStore(subscribe, getSnapshot)
+  useSyncExternalStore(subscribe, getSnapshot, ~getServerSnapshot=() => None)
 }
 
 type connectionInfo = {isActive: bool}
@@ -150,42 +154,73 @@ external _removeOnDelete: (handleLike, @uncurry (Obj.t, Obj.t) => unit) => unit 
 
 external asHandleLike: Obj.t => handleLike = "%identity"
 
+// Snapshot cache: only recompute .toArray() when version bumps.
+// Returning the same array reference prevents useSyncExternalStore from
+// seeing a "change" on every call (Object.is comparison).
+type snapshotCache<'row> = {version: int, data: array<'row>}
+
+let _emptyRows: array<Obj.t> = []
+external _castRows: array<Obj.t> => array<'row> = "%identity"
+
 let useRows = (config: tableConfig<'row>): array<'row> => {
   let conn = useConnection()
   let versionRef = useRef(0)
+  let cachedRef: reactRef<snapshotCache<'row>> = useRef({version: -1, data: _castRows(_emptyRows)})
 
-  let subscribe = notify => {
-    switch conn {
-    | Some(c) =>
-      let h = config.getHandle(c)->asHandleLike
-      let bump = () => {
-        versionRef.current = versionRef.current + 1
-        notify()
+  // Keep conn in a ref so subscribe/getSnapshot closures stay stable.
+  let connRef = useRef(conn)
+  connRef.current = conn
+  let cleanupRef: reactRef<unit => unit> = useRef(() => ())
+
+  // Stable subscribe: reads connRef.current instead of capturing conn directly.
+  // Built once via useMemo0 so useSyncExternalStore doesn't re-subscribe each render.
+  let subscribe = useMemo0(() => {
+    notify => {
+      // Unsubscribe previous
+      cleanupRef.current()
+
+      switch connRef.current {
+      | Some(c) =>
+        let h = config.getHandle(c)->asHandleLike
+        let bump = () => {
+          versionRef.current = versionRef.current + 1
+          notify()
+        }
+        let insertCb = (_ctx, _row) => bump()
+        let updateCb = (_ctx, _prev, _next) => bump()
+        let deleteCb = (_ctx, _row) => bump()
+        h->_onInsert(insertCb)
+        h->_onUpdate(updateCb)
+        h->_onDelete(deleteCb)
+        let cleanup = () => {
+          h->_removeOnInsert(insertCb)
+          h->_removeOnUpdate(updateCb)
+          h->_removeOnDelete(deleteCb)
+        }
+        cleanupRef.current = cleanup
+        cleanup
+      | None =>
+        cleanupRef.current = () => ()
+        () => ()
       }
-      let insertCb = (_ctx, _row) => bump()
-      let updateCb = (_ctx, _prev, _next) => bump()
-      let deleteCb = (_ctx, _row) => bump()
-      h->_onInsert(insertCb)
-      h->_onUpdate(updateCb)
-      h->_onDelete(deleteCb)
-      () => {
-        h->_removeOnInsert(insertCb)
-        h->_removeOnUpdate(updateCb)
-        h->_removeOnDelete(deleteCb)
-      }
-    | None => () => ()
     }
-  }
+  })
 
   let getSnapshot = () => {
-    let _ = versionRef.current
-    switch conn {
-    | Some(c) => config.iter(config.getHandle(c))->Iterator.toArray
-    | None => []
+    let v = versionRef.current
+    if cachedRef.current.version !== v {
+      cachedRef.current = {
+        version: v,
+        data: switch connRef.current {
+        | Some(c) => config.iter(config.getHandle(c))->Iterator.toArray
+        | None => _castRows(_emptyRows)
+        },
+      }
     }
+    cachedRef.current.data
   }
 
-  useSyncExternalStore(subscribe, getSnapshot)
+  useSyncExternalStore(subscribe, getSnapshot, ~getServerSnapshot=() => _castRows(_emptyRows))
 }
 
 // ── Reducer mutation hooks ────────────────────────────────────────────────────

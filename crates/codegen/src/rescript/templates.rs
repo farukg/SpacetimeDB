@@ -32,6 +32,34 @@ pub(super) struct DbFieldRes<'a> {
     pub table_module: &'a str,
 }
 
+/// A `type reducers` field in StdbClient.
+/// Renders: `  @as("accessor") camel: args_type => promise<unit>,`
+/// `accessor` = raw camelCase JS runtime key, `camel` = escaped ReScript field name.
+#[derive(Boilerplate)]
+pub(super) struct ReducerFieldRes<'a> {
+    pub accessor: &'a str,
+    pub camel: &'a str,
+    pub has_args: bool,
+    /// Module-qualified args type, e.g. `Stdb__Reducers__Foo.args`.
+    /// Empty when `has_args` is false.
+    pub args_type: &'a str,
+}
+
+/// A `type procedures` field in StdbClient.
+/// Renders: `  @as("accessor") camel: params_type => promise<response_type>,`
+/// `accessor` = raw camelCase JS runtime key, `camel` = escaped ReScript field name.
+#[derive(Boilerplate)]
+pub(super) struct ProcedureFieldRes<'a> {
+    pub accessor: &'a str,
+    pub camel: &'a str,
+    pub has_args: bool,
+    /// Module-qualified params type, e.g. `Stdb__Procedures__Foo.params`.
+    /// Empty when `has_args` is false.
+    pub params_type: &'a str,
+    /// Module-qualified response type, e.g. `Stdb__Procedures__Foo.response`.
+    pub response_type: &'a str,
+}
+
 // ===========================================================================
 // Layer 1: Structural Sections
 // ===========================================================================
@@ -112,6 +140,15 @@ pub(super) struct StdbClientRes<'a> {
     pub sdk_module: &'a str,
 }
 
+/// `StdbApi.res` — typed reducer/procedure records (leaf dependency, breaks cycle).
+#[derive(Boilerplate)]
+pub(super) struct StdbApiRes<'a> {
+    pub header: AutoGenHeaderRes,
+    pub reducer_fields: Vec<ReducerFieldRes<'a>>,
+    pub procedure_fields: Vec<ProcedureFieldRes<'a>>,
+    pub sdk_module: &'a str,
+}
+
 /// Namespace gateway file (root, tables, reducers, procedures).
 /// Renders a flat list of module aliases.
 #[derive(Boilerplate)]
@@ -180,7 +217,6 @@ pub(super) struct ReducerServerFileRes<'a> {
     pub reducer_module: &'a str,
     /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
     pub sibling_opens: &'a str,
-    pub accessor: &'a str,
 }
 
 /// Per-procedure file: `Stdb*Procedure.res`.
@@ -204,8 +240,7 @@ pub(super) struct ProcedureFileRes<'a> {
 /// Emitted when async_style ∈ {Observer, All}.
 /// Contains: module Make = (E: Async.EFFECT_RUNTIME) => { let call ... }
 #[derive(Boilerplate)]
-pub(super) struct ProcedureMakeFunctorRes<'a> {
-    pub accessor: &'a str,
+pub(super) struct ProcedureMakeFunctorRes {
     pub has_args: bool,
 }
 
@@ -239,7 +274,26 @@ pub(super) struct StdbServerReducersRes<'a> {
 /// Renders: `  | Constructor => "Constructor"`
 #[derive(Boilerplate)]
 pub(super) struct DisplayEnumArmRes<'a> {
+    pub module_name: &'a str,
     pub constructor: &'a str,
+}
+
+/// A unit arm in a Sum enum toString function (no payload).
+/// Renders: `  | Types.Module.Constructor => "Constructor"`
+#[derive(Boilerplate)]
+pub(super) struct DisplaySumUnitArmRes<'a> {
+    pub module_name: &'a str,
+    pub constructor: &'a str,
+}
+
+/// A payload arm in a Sum enum toString function.
+/// Renders: `  | Types.Module.Constructor(payload) => "Constructor(" ++ payloadExpr ++ ")"`
+#[derive(Boilerplate)]
+pub(super) struct DisplaySumPayloadArmRes<'a> {
+    pub module_name: &'a str,
+    pub constructor: &'a str,
+    /// Expression to convert payload to string, e.g. `payload` for string, or `excludeReasonToString(payload)`
+    pub payload_expr: &'a str,
 }
 
 // ===========================================================================
@@ -263,10 +317,20 @@ pub(super) struct DisplayEnumToStringRes<'a> {
     pub arms: Vec<DisplayEnumArmRes<'a>>,
 }
 
+/// A Sum enum toString function with mixed unit/payload arms.
+/// Arms are pre-rendered strings (mix of DisplaySumUnitArmRes and DisplaySumPayloadArmRes).
+#[derive(Boilerplate)]
+pub(super) struct DisplaySumToStringRes<'a> {
+    pub fn_name: &'a str,
+    pub module_name: &'a str,
+    pub arms: Vec<&'a str>,
+}
+
 /// A single match arm in an enum fromString function.
 /// Renders: `  | "Constructor" => Some(Constructor)`
 #[derive(Boilerplate)]
 pub(super) struct DisplayEnumFromStringArmRes<'a> {
+    pub module_name: &'a str,
     pub constructor: &'a str,
 }
 
@@ -288,10 +352,12 @@ pub(super) struct StdbDisplayRes<'a> {
     pub header: AutoGenHeaderRes,
     /// Pre-rendered newtype unwrapper lines.
     pub unwrappers: &'a str,
-    /// Pre-rendered enum toString functions.
+    /// Pre-rendered enum toString functions (PlainEnum).
     pub enum_to_strings: &'a str,
-    /// Pre-rendered enum fromString functions.
+    /// Pre-rendered enum fromString functions (PlainEnum).
     pub enum_from_strings: &'a str,
+    /// Pre-rendered sum enum toString functions (Sum types with payloads).
+    pub sum_to_strings: &'a str,
     /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
     pub sibling_opens: &'a str,
 }
@@ -467,12 +533,44 @@ pub(super) struct TableEventSectionRes;
 #[derive(Boilerplate)]
 pub(super) struct TableObserverSectionRes;
 
+// ===========================================================================
+// Table Functor: shared boilerplate for functor-style table generation
+// ===========================================================================
+
+/// `Stdb__TableFunctor.res` — TABLE module type + Make functor.
+/// Generated once as a global file when `table_style = "functor"`.
+/// Provides: type event, let subscribe, module MakeStream.
+#[derive(Boilerplate)]
+pub(super) struct TableFunctorRes {
+    pub header: AutoGenHeaderRes,
+    /// Pre-rendered `module Alias = Root__Alias` lines.
+    pub sibling_opens: String,
+    /// Whether to emit observer MakeStream section (async_style ∈ {Observer, All}).
+    pub has_observer: bool,
+}
+
+/// Per-table file in functor mode: thin wrapper with `include TableFunctor.Make(...)`.
+#[derive(Boilerplate)]
+pub(super) struct TableFunctorFileRes<'a> {
+    pub header: AutoGenHeaderRes,
+    /// Pre-rendered row record type block.
+    pub row_type: &'a str,
+    /// Pre-rendered PK index section, or empty string if no PK.
+    pub pk_section: &'a str,
+    pub table_name: &'a str,
+    /// Pre-rendered React hooks section, or empty string when async_style = Observer.
+    pub react_hooks: &'a str,
+    /// Pre-rendered display projection section, or empty string if unit type.
+    pub display_section: &'a str,
+    /// Pre-rendered `module Alias = Root__Alias` lines.
+    pub sibling_opens: &'a str,
+}
+
 /// Make functor section for reducer files (with or without args).
 /// Emitted when async_style ∈ {Observer, All}.
 /// Contains: module Make = (E: Async.EFFECT_RUNTIME) => { let call ... }
 #[derive(Boilerplate)]
-pub(super) struct ReducerMakeFunctorRes<'a> {
-    pub accessor: &'a str,
+pub(super) struct ReducerMakeFunctorRes {
     pub has_args: bool,
 }
 

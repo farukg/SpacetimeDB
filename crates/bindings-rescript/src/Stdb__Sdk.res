@@ -242,6 +242,10 @@ external buildConnection: dbConnectionBuilder => connection = "build"
 @get external isActive: connection => bool = "isActive"
 @send external disconnect: connection => unit = "disconnect"
 
+// Opaque accessors for per-reducer/procedure @send externals (no Client dependency).
+@get external getReducers: connection => reducers = "reducers"
+@get external getProcedures: connection => procedures = "procedures"
+
 // ─── Subscription builder ───────────────────────────────────────────
 
 type subscriptionBuilder

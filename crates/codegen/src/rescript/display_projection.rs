@@ -45,8 +45,6 @@ enum FieldProjection {
         /// Expression for toString (e.g., `row.field->Stdb__Display.enumToString`).
         to_label_expr: String,
     },
-    /// Bigint → float.
-    BigintToFloat { convert_expr: String },
     /// Timestamp → float.
     TimestampToFloat { convert_expr: String },
     /// Identity → string.
@@ -127,15 +125,6 @@ pub(super) fn render_display_section(
                     camel_name: format!("{camel}Label"),
                     type_str: "string".to_string(),
                     convert_expr: to_label_expr,
-                });
-            }
-            FieldProjection::BigintToFloat { convert_expr } => {
-                // Dead arm: no path emits BigintToFloat after Change 1.
-                // Kept for exhaustiveness; emits bigint pass-through for safety.
-                display_fields.push(DisplayFieldData {
-                    camel_name: camel,
-                    type_str: "bigint".to_string(),
-                    convert_expr,
                 });
             }
             FieldProjection::TimestampToFloat { convert_expr } => {
@@ -250,11 +239,6 @@ fn classify_field(
                 FieldProjection::Passthrough { type_str } => FieldProjection::Passthrough {
                     type_str: format!("option<{type_str}>"),
                 },
-                // Dead arm: BigintToFloat is never emitted after Change 1.
-                // Kept for exhaustiveness; option<bigint> passes through unchanged.
-                FieldProjection::BigintToFloat { .. } => FieldProjection::Passthrough {
-                    type_str: "option<bigint>".to_string(),
-                },
                 FieldProjection::TimestampToFloat { convert_expr } => FieldProjection::OptionWrapped {
                     inner_display_type: "float".to_string(),
                     convert_expr: format!("{row_access}->Option.map(v => {convert_expr})"),
@@ -321,8 +305,16 @@ fn classify_field(
                         to_label_expr: format!("{row_access}->{display_module}.{fn_name}"),
                     }
                 }
+                AlgebraicTypeDef::Sum(_) => {
+                    // Sum type (payload-carrying enum) → keep typed field + add label field
+                    let fn_name = format!("{}ToString", pascal_name.to_case(Case::Camel));
+                    FieldProjection::PlainEnum {
+                        enum_type: format!("{types_module}.{module_name}.t"),
+                        to_label_expr: format!("{row_access}->{display_module}.{fn_name}"),
+                    }
+                }
                 _ => {
-                    // Multi-field product or tagged sum → pass through
+                    // Multi-field product → pass through
                     FieldProjection::Passthrough {
                         type_str: super::helpers::render_res_type(module, ty, TypeRefStyle::ViaGateway, root_module),
                     }
