@@ -49,13 +49,12 @@ build_fork:
             git config --global url."http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com/".insteadOf "ssh://gitlab@gitlab.next.myicecreamlab.com:2222/" ; \
           fi
       
-      # Clean cargo config and create fresh one with file:// sigma registry
-      RUN rm -rf /root/.cargo && mkdir -p /root/.cargo
-      
-      # Set up cargo config for sigma registry
+      # Set up cargo config for sigma registry.
+      # rust:* Docker images set CARGO_HOME=/usr/local/cargo — must write there,
+      # NOT to ~/.cargo, or cargo will never read the config.
       # Rust 1.74+ requires global-credential-providers for authenticated registries.
       # cargo:token reads CARGO_REGISTRIES_SIGMA_TOKEN env var.
-      RUN printf '[build]\nrustflags = ["--cfg", "tokio_unstable"]\n\n[registries.sigma]\nindex = "file:///tmp/cargo-index"\ncredential-provider = "cargo:token"\n\n[registry]\nglobal-credential-providers = ["cargo:token"]\n\n[net]\ngit-fetch-with-cli = true\n' > /root/.cargo/config.toml
+      RUN printf '[build]\nrustflags = ["--cfg", "tokio_unstable"]\n\n[registries.sigma]\nindex = "file:///tmp/cargo-index"\ncredential-provider = "cargo:token"\n\n[registry]\nglobal-credential-providers = ["cargo:token"]\n\n[net]\ngit-fetch-with-cli = true\n' > $CARGO_HOME/config.toml
       
       # Set registry token via env var (cargo:token provider reads this)
       ENV CARGO_REGISTRIES_SIGMA_TOKEN="Bearer ${CI_JOB_TOKEN}"
@@ -70,10 +69,14 @@ build_fork:
           fi
       
       # Verify config
-      RUN cat /root/.cargo/config.toml
+      RUN cat $CARGO_HOME/config.toml
       
       WORKDIR /build
       COPY . .
+      
+      # Remove workspace .cargo/config.toml — it has ssh:// index URLs that
+      # conflict with the file:// index we set in $CARGO_HOME/config.toml.
+      RUN rm -rf .cargo
       
       # Strip [patch.*] sections
       RUN sed -i '/^\[patch\./,$d' Cargo.toml
