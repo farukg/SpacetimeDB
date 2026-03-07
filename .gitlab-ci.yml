@@ -118,9 +118,9 @@ build_fork:
       mkdir -p artifacts
       CTR=$(sudo buildah from stdb-build:${CI_COMMIT_SHORT_SHA})
       MNT=$(sudo buildah mount "$CTR")
-      cp "$MNT/spacetimedb-cli" artifacts/
-      cp "$MNT/spacetimedb-standalone" artifacts/
-      cp "$MNT/"spacetimedb-rescript-*.tgz artifacts/
+      sudo cp "$MNT/spacetimedb-cli" artifacts/
+      sudo cp "$MNT/spacetimedb-standalone" artifacts/
+      sudo cp "$MNT/"spacetimedb-rescript-*.tgz artifacts/
       sudo buildah unmount "$CTR"
       sudo buildah rm "$CTR"
 
