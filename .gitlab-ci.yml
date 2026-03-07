@@ -1,0 +1,178 @@
+# SpacetimeDB Fork CI
+# Builds spacetimedb-cli, spacetimedb-standalone, and ReScript SDK,
+# publishes to GitLab Generic Package Registry, and creates a git tag.
+#
+# Trigger: any branch push to GitLab
+# Tag format: v2.0.0-fork-<short-sha>
+#
+# Required CI variables:
+#   GITLAB_TAG_TOKEN — token with write_repository scope (for creating tags)
+
+stages:
+  - build
+  - publish
+
+variables:
+  PACKAGE_NAME: spacetimedb-release
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH
+
+build_fork:
+  stage: build
+  tags: [deploy]
+  interruptible: true
+  script:
+    - |
+      echo "=== Building SpacetimeDB fork ==="
+      echo "Branch: ${CI_COMMIT_REF_NAME}"
+      echo "SHA:    ${CI_COMMIT_SHA}"
+
+    - |
+      cat > /tmp/Containerfile.stdb-${CI_JOB_ID} << 'CONTAINERFILE'
+      FROM rust:1.93-bookworm AS builder
+      
+      ARG CI_JOB_TOKEN
+      ENV CI_JOB_TOKEN=${CI_JOB_TOKEN}
+      
+      # Install build dependencies
+      RUN rustup target add wasm32-unknown-unknown
+      RUN apt-get update && apt-get install -y --no-install-recommends \
+          nodejs npm git curl \
+          && rm -rf /var/lib/apt/lists/*
+      
+      # Git auth for private repos
+      RUN if [ -n "$CI_JOB_TOKEN" ]; then \
+            git config --global credential.helper store && \
+            echo "http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com" > /root/.git-credentials && \
+            git config --global url."http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com/".insteadOf "ssh://gitlab@gitlab.next.myicecreamlab.com:2222/" ; \
+          fi
+      
+      # Clean cargo config and create fresh one with file:// sigma registry
+      RUN rm -rf /root/.cargo && mkdir -p /root/.cargo
+      
+      # Set up cargo config for sigma registry with explicit token provider
+      # cargo 1.80+ needs this format
+      RUN cat > /root/.cargo/config.toml << 'EOF'
+[build]
+rustflags = ["--cfg", "tokio_unstable"]
+
+[registries.sigma]
+index = "file:///tmp/cargo-index"
+
+[credential]
+providers = ["git", "configure"]
+
+[registries.sigma.credentials]
+token = "Bearer"
+EOF
+      
+      # Store the token in credentials helper location
+      RUN mkdir -p /root/.cargo/credentials.d && \
+          echo "sigma" > /root/.cargo/credentials.d/sigma && \
+          echo "${CI_JOB_TOKEN}" >> /root/.cargo/credentials.d/sigma
+      
+      # Clone and prepare sigma cargo-index
+      RUN if [ -n "$CI_JOB_TOKEN" ]; then \
+            git clone "http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com/org/shared/cargo-index.git" /tmp/cargo-index ; \
+          fi
+      
+      # Verify config
+      RUN cat /root/.cargo/config.toml
+      
+      WORKDIR /build
+      COPY . .
+      
+      # Strip [patch.*] sections
+      RUN sed -i '/^\[patch\./,$d' Cargo.toml
+      
+      # Build Rust binaries
+      RUN cargo build --release -p spacetimedb-cli
+      RUN cargo build --release -p spacetimedb-standalone
+      
+      # Build ReScript SDK tarball
+      WORKDIR /build/crates/bindings-rescript
+      RUN npm install --ignore-scripts 2>/dev/null || true
+      RUN npx rescript clean && npx rescript build
+      RUN npm pack
+      
+      # Artifact extraction
+      FROM scratch AS artifacts
+      COPY --from=builder /build/target/release/spacetimedb-cli /spacetimedb-cli
+      COPY --from=builder /build/target/release/spacetimedb-standalone /spacetimedb-standalone
+      COPY --from=builder /build/crates/bindings-rescript/spacetimedb-rescript-*.tgz /
+      CONTAINERFILE
+
+    - |
+      echo "--- Building container image ---"
+      sudo buildah bud \
+        --network=host \
+        --build-arg CI_JOB_TOKEN="${CI_JOB_TOKEN}" \
+        --layers \
+        -t stdb-build:${CI_COMMIT_SHORT_SHA} \
+        -f /tmp/Containerfile.stdb-${CI_JOB_ID} \
+        .
+
+    - |
+      echo "--- Extracting artifacts ---"
+      mkdir -p artifacts
+      MNT=$(sudo buildah mount stdb-build:${CI_COMMIT_SHORT_SHA})
+      cp "$MNT/spacetimedb-cli" artifacts/
+      cp "$MNT/spacetimedb-standalone" artifacts/
+      cp "$MNT/"spacetimedb-rescript-*.tgz artifacts/
+      sudo buildah unmount stdb-build:${CI_COMMIT_SHORT_SHA}
+
+    - |
+      echo "--- Artifacts ---"
+      ls -lh artifacts/
+
+  artifacts:
+    paths:
+      - artifacts/
+    expire_in: 1 hour
+
+  after_script:
+    - sudo buildah rmi -f stdb-build:${CI_COMMIT_SHORT_SHA} 2>/dev/null || true
+    - rm -f /tmp/Containerfile.stdb-${CI_JOB_ID}
+
+publish_packages:
+  stage: publish
+  tags: [deploy]
+  needs: [build_fork]
+  script:
+    - TAG="v2.0.0-fork-${CI_COMMIT_SHORT_SHA}"
+
+    - |
+      echo "=== Publishing packages ==="
+      echo "Tag: ${TAG}"
+
+    - |
+      for FILE in artifacts/*; do
+        FILENAME=$(basename "$FILE")
+        echo "Uploading ${FILENAME}..."
+        HTTP_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --upload-file "$FILE" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${TAG}/${FILENAME}")
+        echo "  ${FILENAME}: HTTP ${HTTP_STATUS}"
+        if [ "$HTTP_STATUS" != "201" ] && [ "$HTTP_STATUS" != "200" ]; then
+          echo "ERROR: Failed to upload ${FILENAME}"
+          exit 1
+        fi
+      done
+
+    - |
+      echo "Creating tag ${TAG}..."
+      curl -sf -X POST \
+        --header "PRIVATE-TOKEN: ${GITLAB_TAG_TOKEN}" \
+        --data "ref=${CI_COMMIT_SHA}" \
+        --data "tag_name=${TAG}" \
+        --data "message=CI build ${CI_PIPELINE_ID}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/tags"
+
+    - |
+      echo ""
+      echo "=== Published successfully ==="
+      echo "Tag:      ${TAG}"
+      echo "Download: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${TAG}/"
