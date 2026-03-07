@@ -52,30 +52,34 @@ build_fork:
       # Clean cargo config and create fresh one with file:// sigma registry
       RUN rm -rf /root/.cargo && mkdir -p /root/.cargo
       
-      # Set up cargo config for sigma registry with explicit token provider
-      # cargo 1.80+ needs this format
+      # Set up cargo config for sigma registry
+      # Rust 1.74+ requires global-credential-providers for authenticated registries.
+      # cargo:token reads CARGO_REGISTRIES_SIGMA_TOKEN env var.
       RUN cat > /root/.cargo/config.toml << 'EOF'
 [build]
 rustflags = ["--cfg", "tokio_unstable"]
 
 [registries.sigma]
 index = "file:///tmp/cargo-index"
+credential-provider = "cargo:token"
 
-[credential]
-providers = ["git", "configure"]
+[registry]
+global-credential-providers = ["cargo:token"]
 
-[registries.sigma.credentials]
-token = "Bearer"
+[net]
+git-fetch-with-cli = true
 EOF
       
-      # Store the token in credentials helper location
-      RUN mkdir -p /root/.cargo/credentials.d && \
-          echo "sigma" > /root/.cargo/credentials.d/sigma && \
-          echo "${CI_JOB_TOKEN}" >> /root/.cargo/credentials.d/sigma
+      # Set registry token via env var (cargo:token provider reads this)
+      ENV CARGO_REGISTRIES_SIGMA_TOKEN="Bearer ${CI_JOB_TOKEN}"
       
-      # Clone and prepare sigma cargo-index
+      # Clone sigma cargo-index and patch dl URL from https to http
+      # (the build container resolves gitlab host to backend IP where TLS is
+      # terminated by Traefik, so only HTTP works for crate downloads)
       RUN if [ -n "$CI_JOB_TOKEN" ]; then \
-            git clone "http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com/org/shared/cargo-index.git" /tmp/cargo-index ; \
+            git clone "http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com/org/shared/cargo-index.git" /tmp/cargo-index && \
+            sed -i 's|https://gitlab.next.myicecreamlab.com|http://gitlab.next.myicecreamlab.com|g' /tmp/cargo-index/config.json && \
+            cd /tmp/cargo-index && git add config.json && git -c user.email=ci@ci -c user.name=ci commit -m "patch dl to http" && cd / ; \
           fi
       
       # Verify config
