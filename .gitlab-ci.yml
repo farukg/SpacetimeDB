@@ -55,20 +55,7 @@ build_fork:
       # Set up cargo config for sigma registry
       # Rust 1.74+ requires global-credential-providers for authenticated registries.
       # cargo:token reads CARGO_REGISTRIES_SIGMA_TOKEN env var.
-      RUN cat > /root/.cargo/config.toml << 'EOF'
-[build]
-rustflags = ["--cfg", "tokio_unstable"]
-
-[registries.sigma]
-index = "file:///tmp/cargo-index"
-credential-provider = "cargo:token"
-
-[registry]
-global-credential-providers = ["cargo:token"]
-
-[net]
-git-fetch-with-cli = true
-EOF
+      RUN printf '[build]\nrustflags = ["--cfg", "tokio_unstable"]\n\n[registries.sigma]\nindex = "file:///tmp/cargo-index"\ncredential-provider = "cargo:token"\n\n[registry]\nglobal-credential-providers = ["cargo:token"]\n\n[net]\ngit-fetch-with-cli = true\n' > /root/.cargo/config.toml
       
       # Set registry token via env var (cargo:token provider reads this)
       ENV CARGO_REGISTRIES_SIGMA_TOKEN="Bearer ${CI_JOB_TOKEN}"
