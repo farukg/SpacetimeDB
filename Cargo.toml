@@ -395,3 +395,8 @@ result_large_err = "allow"
 # This silences a warning in our Nix flake, which otherwise would be upset that our call to `crateNameFromCargoToml`
 # is running against a file that doesn't have a name in it.
 crane.name = "spacetimedb"
+
+# Local dev override — use local path for sigma crates instead of registry.
+# This section is ignored in CI (no matching path exists in Docker context).
+[patch.sigma]
+sigma_rescript_codegen = { path = "../../../sigma/sigma-tools/gen/sigma_rescript_codegen" }

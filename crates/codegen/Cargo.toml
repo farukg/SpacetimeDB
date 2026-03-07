@@ -17,7 +17,7 @@ boilerplate = "1.1.1"
 convert_case.workspace = true
 itertools.workspace = true
 serde = { workspace = true, features = ["derive"] }
-sigma_rescript_codegen = { path = "../../../../sigma/sigma-tools/gen/sigma_rescript_codegen" }
+sigma_rescript_codegen = { version = "0.1.0", registry = "sigma" }
 toml.workspace = true
 
 [dev-dependencies]

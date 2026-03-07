@@ -128,6 +128,37 @@ else
     "${BUILD_DIR}"/*
 fi
 
+# ---------------------------------------------------------------------------
+# 8. Upload to GitLab Generic Package Registry (if GITLAB_TOKEN is set)
+# ---------------------------------------------------------------------------
+if [[ -n "${GITLAB_TOKEN:-}" ]]; then
+  echo ""
+  echo "--- Uploading to GitLab Generic Package Registry ---"
+  GITLAB_URL="${GITLAB_URL:-https://gitlab.next.myicecreamlab.com}"
+  GITLAB_PROJECT_ID="${GITLAB_PROJECT_ID:-25}"
+  
+  for ARTIFACT in "${BUILD_DIR}"/*; do
+    FILENAME=$(basename "$ARTIFACT")
+    echo "Uploading ${FILENAME}..."
+    HTTP_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+      --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+      --upload-file "$ARTIFACT" \
+      "${GITLAB_URL}/api/v4/projects/${GITLAB_PROJECT_ID}/packages/generic/spacetimedb-release/${TAG}/${FILENAME}")
+    
+    if [[ "$HTTP_STATUS" == "201" || "$HTTP_STATUS" == "200" ]]; then
+      echo "  ✓ ${FILENAME} (HTTP ${HTTP_STATUS})"
+    else
+      echo "  ✗ ${FILENAME} failed (HTTP ${HTTP_STATUS})"
+    fi
+  done
+  
+  echo ""
+  echo "GitLab download base: ${GITLAB_URL}/api/v4/projects/${GITLAB_PROJECT_ID}/packages/generic/spacetimedb-release/${TAG}/"
+else
+  echo ""
+  echo "GITLAB_TOKEN not set — skipping GitLab upload"
+fi
+
 echo ""
 echo "=== Done! Release ${TAG} published ==="
 echo "https://github.com/$(git -C "${REPO_ROOT}" remote get-url origin | sed 's/.*github.com[:/]\(.*\)\.git/\1/')/releases/tag/${TAG}"
