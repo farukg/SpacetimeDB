@@ -39,8 +39,13 @@ build_fork:
       # Install build dependencies
       RUN rustup target add wasm32-unknown-unknown
       RUN apt-get update && apt-get install -y --no-install-recommends \
-          nodejs npm git curl \
+          git curl ca-certificates gnupg \
           && rm -rf /var/lib/apt/lists/*
+      
+      # Install Node.js 22.x (ReScript requires >= 20.11.0, bookworm ships 18.x)
+      RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+          apt-get install -y --no-install-recommends nodejs && \
+          rm -rf /var/lib/apt/lists/*
       
       # Git auth for private repos
       RUN if [ -n "$CI_JOB_TOKEN" ]; then \
