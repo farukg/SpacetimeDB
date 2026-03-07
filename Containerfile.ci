@@ -1,0 +1,122 @@
+# SpacetimeDB Fork CI Build
+#
+# Cache strategy (buildah --layers):
+#   Phase 1 — Stable tooling (rustup, apt, nodesource, cargo config)
+#     Cached indefinitely; only busts when tooling lines change.
+#     CI_JOB_TOKEN is NOT declared here — token changes never bust these layers.
+#   Phase 2 — Token-dependent setup (git auth, cargo-index clone)
+#     ARG CI_JOB_TOKEN declared HERE. Busts every run (~5s each step).
+#   Phase 3 — Manifest-only dep pre-build
+#     COPY --from=manifests (only Cargo.toml + Cargo.lock, no .rs files).
+#     Deps compiled; busts only when manifests/lock change.
+#     Source-only pushes hit this phase from cache entirely.
+#   Phase 4 — Real source build
+#     COPY . . (full source); busts on source changes.
+#     Cargo only recompiles workspace crates (~30s), all external deps cached.
+#   Phase 5 — ReScript SDK build
+
+# ── Phase 1: Stable tooling ────────────────────────────────────────────────────
+FROM rust:1.93-bookworm AS builder
+
+RUN rustup target add wasm32-unknown-unknown
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22.x — ReScript requires >= 20.11.0, bookworm ships 18.x
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cargo config: sigma registry via file:// index (cloned in Phase 2).
+# rust:* images set CARGO_HOME=/usr/local/cargo — write there, not ~/.cargo.
+# global-credential-providers required since Rust 1.74+ for auth registries.
+RUN printf '[build]\nrustflags = ["--cfg", "tokio_unstable"]\n\n[registries.sigma]\nindex = "file:///tmp/cargo-index"\ncredential-provider = "cargo:token"\n\n[registry]\nglobal-credential-providers = ["cargo:token"]\n\n[net]\ngit-fetch-with-cli = true\n' \
+    > $CARGO_HOME/config.toml
+
+# ── Phase 2: Token-dependent setup ────────────────────────────────────────────
+# ARG declared HERE so Phase 1 layers are never busted by per-job token values.
+ARG CI_JOB_TOKEN
+ENV CI_JOB_TOKEN=${CI_JOB_TOKEN}
+ENV CARGO_REGISTRIES_SIGMA_TOKEN="Bearer ${CI_JOB_TOKEN}"
+
+# Git credentials for private GitLab repos (ssh -> http rewrite)
+RUN if [ -n "$CI_JOB_TOKEN" ]; then \
+      git config --global credential.helper store && \
+      echo "http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com" \
+        > /root/.git-credentials && \
+      git config --global \
+        url."http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com/".insteadOf \
+        "ssh://gitlab@gitlab.next.myicecreamlab.com:2222/" ; \
+    fi
+
+# Clone sigma cargo-index; patch dl URL from https to http
+# (build container resolves gitlab host to backend IP, TLS terminates at Traefik)
+RUN if [ -n "$CI_JOB_TOKEN" ]; then \
+      git clone \
+        "http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com/org/shared/cargo-index.git" \
+        /tmp/cargo-index && \
+      sed -i \
+        's|https://gitlab.next.myicecreamlab.com|http://gitlab.next.myicecreamlab.com|g' \
+        /tmp/cargo-index/config.json && \
+      cd /tmp/cargo-index && \
+        git add config.json && \
+        git -c user.email=ci@ci -c user.name=ci commit -m "patch dl to http" && \
+      cd / ; \
+    fi
+
+# ── Phase 3: Dep pre-build ─────────────────────────────────────────────────────
+# 'manifests' build context contains ONLY Cargo.toml files + Cargo.lock.
+# No .rs source files → stable across source-only pushes.
+WORKDIR /build
+COPY --from=manifests / ./
+
+# Workspace .cargo/config.toml has ssh:// index URL — remove it so our
+# CARGO_HOME config (with file:// index) takes effect.
+RUN rm -rf .cargo
+
+# Strip [patch.*] sections (reference local paths that don't exist in CI)
+RUN sed -i '/^\[patch\./,$d' Cargo.toml
+
+# Create dummy src/lib.rs + src/main.rs in every workspace member so cargo can
+# resolve and compile ALL external dependencies. Build may fail (missing
+# symbols) — that's fine; we only need the dep compilation to succeed.
+RUN find . -name 'Cargo.toml' -not -path './Cargo.toml' | while IFS= read -r toml; do \
+      dir="$(dirname "$toml")"; \
+      mkdir -p "$dir/src"; \
+      printf '' > "$dir/src/lib.rs"; \
+      printf 'fn main(){}\n' > "$dir/src/main.rs"; \
+    done
+
+# Build deps — failures expected/OK (dummy sources); external crates get cached.
+RUN cargo build --release \
+      -p spacetimedb-cli \
+      -p spacetimedb-standalone \
+    2>&1 || true
+
+# Remove dummy artifacts so real build doesn't pick up stale fingerprints
+RUN cargo clean -p spacetimedb-cli -p spacetimedb-standalone \
+    2>/dev/null || true
+RUN find . -name '*.d' -path '*/release/build/*' -delete 2>/dev/null || true
+
+# ── Phase 4: Real source build ─────────────────────────────────────────────────
+# COPY overwrites dummy sources with real ones.
+COPY . .
+RUN rm -rf .cargo
+RUN sed -i '/^\[patch\./,$d' Cargo.toml
+
+# Build both targets in one invocation — shared dep graph, max parallelism
+RUN cargo build --release -p spacetimedb-cli -p spacetimedb-standalone
+
+# ── Phase 5: ReScript SDK ──────────────────────────────────────────────────────
+WORKDIR /build/crates/bindings-rescript
+RUN npm install --ignore-scripts 2>/dev/null || true
+RUN npx rescript clean && npx rescript build
+RUN npm pack
+
+# ── Artifacts stage ────────────────────────────────────────────────────────────
+FROM scratch AS artifacts
+COPY --from=builder /build/target/release/spacetimedb-cli /spacetimedb-cli
+COPY --from=builder /build/target/release/spacetimedb-standalone /spacetimedb-standalone
+COPY --from=builder /build/crates/bindings-rescript/spacetimedb-rescript-*.tgz /

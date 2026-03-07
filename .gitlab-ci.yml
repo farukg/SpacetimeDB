@@ -7,6 +7,9 @@
 #
 # Required CI variables:
 #   GITLAB_TAG_TOKEN — token with write_repository scope (for creating tags)
+#
+# Build file: Containerfile.ci (in repo root)
+# Cache strategy: see Containerfile.ci header for layer-by-layer explanation.
 
 stages:
   - build
@@ -14,6 +17,7 @@ stages:
 
 variables:
   PACKAGE_NAME: spacetimedb-release
+  MANIFESTS_DIR: /tmp/stdb-manifests-${CI_JOB_ID}
 
 workflow:
   rules:
@@ -30,87 +34,29 @@ build_fork:
       echo "SHA:    ${CI_COMMIT_SHA}"
 
     - |
-      cat > /tmp/Containerfile.stdb-${CI_JOB_ID} << 'CONTAINERFILE'
-      FROM rust:1.93-bookworm AS builder
-      
-      ARG CI_JOB_TOKEN
-      ENV CI_JOB_TOKEN=${CI_JOB_TOKEN}
-      
-      # Install build dependencies
-      RUN rustup target add wasm32-unknown-unknown
-      RUN apt-get update && apt-get install -y --no-install-recommends \
-          git curl ca-certificates gnupg \
-          && rm -rf /var/lib/apt/lists/*
-      
-      # Install Node.js 22.x (ReScript requires >= 20.11.0, bookworm ships 18.x)
-      RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-          apt-get install -y --no-install-recommends nodejs && \
-          rm -rf /var/lib/apt/lists/*
-      
-      # Git auth for private repos
-      RUN if [ -n "$CI_JOB_TOKEN" ]; then \
-            git config --global credential.helper store && \
-            echo "http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com" > /root/.git-credentials && \
-            git config --global url."http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com/".insteadOf "ssh://gitlab@gitlab.next.myicecreamlab.com:2222/" ; \
-          fi
-      
-      # Set up cargo config for sigma registry.
-      # rust:* Docker images set CARGO_HOME=/usr/local/cargo — must write there,
-      # NOT to ~/.cargo, or cargo will never read the config.
-      # Rust 1.74+ requires global-credential-providers for authenticated registries.
-      # cargo:token reads CARGO_REGISTRIES_SIGMA_TOKEN env var.
-      RUN printf '[build]\nrustflags = ["--cfg", "tokio_unstable"]\n\n[registries.sigma]\nindex = "file:///tmp/cargo-index"\ncredential-provider = "cargo:token"\n\n[registry]\nglobal-credential-providers = ["cargo:token"]\n\n[net]\ngit-fetch-with-cli = true\n' > $CARGO_HOME/config.toml
-      
-      # Set registry token via env var (cargo:token provider reads this)
-      ENV CARGO_REGISTRIES_SIGMA_TOKEN="Bearer ${CI_JOB_TOKEN}"
-      
-      # Clone sigma cargo-index and patch dl URL from https to http
-      # (the build container resolves gitlab host to backend IP where TLS is
-      # terminated by Traefik, so only HTTP works for crate downloads)
-      RUN if [ -n "$CI_JOB_TOKEN" ]; then \
-            git clone "http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.next.myicecreamlab.com/org/shared/cargo-index.git" /tmp/cargo-index && \
-            sed -i 's|https://gitlab.next.myicecreamlab.com|http://gitlab.next.myicecreamlab.com|g' /tmp/cargo-index/config.json && \
-            cd /tmp/cargo-index && git add config.json && git -c user.email=ci@ci -c user.name=ci commit -m "patch dl to http" && cd / ; \
-          fi
-      
-      # Verify config
-      RUN cat $CARGO_HOME/config.toml
-      
-      WORKDIR /build
-      COPY . .
-      
-      # Remove workspace .cargo/config.toml — it has ssh:// index URLs that
-      # conflict with the file:// index we set in $CARGO_HOME/config.toml.
-      RUN rm -rf .cargo
-      
-      # Strip [patch.*] sections
-      RUN sed -i '/^\[patch\./,$d' Cargo.toml
-      
-      # Build Rust binaries
-      RUN cargo build --release -p spacetimedb-cli
-      RUN cargo build --release -p spacetimedb-standalone
-      
-      # Build ReScript SDK tarball
-      WORKDIR /build/crates/bindings-rescript
-      RUN npm install --ignore-scripts 2>/dev/null || true
-      RUN npx rescript clean && npx rescript build
-      RUN npm pack
-      
-      # Artifact extraction
-      FROM scratch AS artifacts
-      COPY --from=builder /build/target/release/spacetimedb-cli /spacetimedb-cli
-      COPY --from=builder /build/target/release/spacetimedb-standalone /spacetimedb-standalone
-      COPY --from=builder /build/crates/bindings-rescript/spacetimedb-rescript-*.tgz /
-      CONTAINERFILE
+      echo "--- Staging Cargo manifests for dep-cache build context ---"
+      mkdir -p "${MANIFESTS_DIR}"
+      find . \
+        -not -path './.git/*' \
+        -not -path './target/*' \
+        -name 'Cargo.toml' \
+        | while IFS= read -r f; do
+            dest="${MANIFESTS_DIR}/${f#./}"
+            mkdir -p "$(dirname "$dest")"
+            cp "$f" "$dest"
+          done
+      cp Cargo.lock "${MANIFESTS_DIR}/Cargo.lock"
+      echo "Staged $(find "${MANIFESTS_DIR}" -name 'Cargo.toml' | wc -l) Cargo.toml files + Cargo.lock"
 
     - |
       echo "--- Building container image ---"
       sudo buildah bud \
         --network=host \
         --build-arg CI_JOB_TOKEN="${CI_JOB_TOKEN}" \
+        --build-context manifests="${MANIFESTS_DIR}" \
         --layers \
         -t stdb-build:${CI_COMMIT_SHORT_SHA} \
-        -f /tmp/Containerfile.stdb-${CI_JOB_ID} \
+        -f Containerfile.ci \
         .
 
     - |
@@ -120,7 +66,7 @@ build_fork:
       MNT=$(sudo buildah mount "$CTR")
       sudo cp "$MNT/spacetimedb-cli" artifacts/
       sudo cp "$MNT/spacetimedb-standalone" artifacts/
-      sudo cp "$MNT/"spacetimedb-rescript-*.tgz artifacts/
+      sudo bash -c "cp \"$MNT\"/spacetimedb-rescript-*.tgz artifacts/"
       sudo buildah unmount "$CTR"
       sudo buildah rm "$CTR"
 
@@ -135,7 +81,7 @@ build_fork:
 
   after_script:
     - sudo buildah rmi -f stdb-build:${CI_COMMIT_SHORT_SHA} 2>/dev/null || true
-    - rm -f /tmp/Containerfile.stdb-${CI_JOB_ID}
+    - rm -rf /tmp/stdb-manifests-${CI_JOB_ID}
 
 publish_packages:
   stage: publish
