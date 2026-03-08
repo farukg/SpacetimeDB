@@ -263,6 +263,28 @@ external onSubError: (subscriptionBuilder, ('ctx, JsExn.t) => unit) => subscript
 @send
 external subscribe: (subscriptionBuilder, array<string>) => unit = "subscribe"
 
+// ─── SDK Result bridge ─────────────────────────────────────────────
+//
+// The JS SDK deserializes Result<T,E> as {ok: T} | {err: E}.
+// ReScript result<T,E> uses {TAG: "Ok", _0: T} | {TAG: "Error", _0: E}.
+// This bridge converts at the procedure call boundary.
+//
+// Object.hasOwn is used because it correctly handles all payload types
+// including option<T> where Ok(None) becomes {ok: undefined}.
+
+type sdkResult<'ok, 'err>
+
+@val external _hasOwn: ('a, string) => bool = "Object.hasOwn"
+@get external _rawOk: sdkResult<'ok, 'err> => 'ok = "ok"
+@get external _rawErr: sdkResult<'ok, 'err> => 'err = "err"
+
+let fromSdkResult = (raw: sdkResult<'ok, 'err>): result<'ok, 'err> =>
+  if _hasOwn(raw, "ok") {
+    Ok(_rawOk(raw))
+  } else {
+    Error(_rawErr(raw))
+  }
+
 // ─── Utilities ──────────────────────────────────────────────────────
 
 // Connection builder — opaque type for SpacetimeDBProvider

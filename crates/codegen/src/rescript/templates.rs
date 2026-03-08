@@ -230,6 +230,12 @@ pub(super) struct ProcedureFileRes<'a> {
     pub procedure_name: &'a str,
     pub accessor: &'a str,
     pub has_args: bool,
+    /// True when the procedure returns `result<T, E>` (needs SDK→ReScript shim).
+    pub is_result: bool,
+    /// Pre-rendered ok type expression (non-empty only when `is_result`).
+    pub ok_type: &'a str,
+    /// Pre-rendered err type expression (non-empty only when `is_result`).
+    pub err_type: &'a str,
     /// Pre-rendered Make functor section, or empty string when async_style = Promise.
     pub make_functor: &'a str,
     /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).

@@ -359,6 +359,29 @@ impl Lang for ReScript {
             root_module,
         );
 
+        // SDK BSATN returns {ok, err} but ReScript result uses {TAG, _0} — need shim.
+        // Extract ok/err type strings for Sdk.sdkResult<ok, err> in the external.
+        let ok_type_str;
+        let err_type_str;
+        let (is_result, ok_type, err_type): (bool, &str, &str) = match &procedure.return_type_for_generate {
+            spacetimedb_schema::type_for_generate::AlgebraicTypeUse::Result { ok_ty, err_ty } => {
+                ok_type_str = render_res_type(module, ok_ty, TypeRefStyle::ViaGateway, root_module);
+                err_type_str = if matches!(
+                    err_ty.as_ref(),
+                    spacetimedb_schema::type_for_generate::AlgebraicTypeUse::String
+                ) {
+                    format!(
+                        "option<{}>",
+                        render_res_type(module, err_ty, TypeRefStyle::ViaGateway, root_module)
+                    )
+                } else {
+                    render_res_type(module, err_ty, TypeRefStyle::ViaGateway, root_module)
+                };
+                (true, ok_type_str.as_str(), err_type_str.as_str())
+            }
+            _ => (false, "", ""),
+        };
+
         // Pre-render Make functor when async_style ∈ {Observer, All}.
         let make_functor_str;
         let make_functor: &str = match self.async_style {
@@ -386,6 +409,9 @@ impl Lang for ReScript {
                 procedure_name: &procedure.name,
                 accessor: &accessor,
                 has_args,
+                is_result,
+                ok_type,
+                err_type,
                 make_functor,
                 sibling_opens: &sibling_opens,
             }
