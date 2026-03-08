@@ -12,6 +12,7 @@
 // Schema-specific table/reducer configs live in {{self.root_module}}__Bridge.res.
 
 module Sdk = {{self.root_module}}__Sdk
+module Normalize = {{self.root_module}}__Normalize
 module Client = {{self.root_module}}__Client
 module Schema = {{self.root_module}}__Schema
 
@@ -42,7 +43,7 @@ external useMemo0: (unit => 'a) => 'a = "useMemo"
 // ── Connection Context ────────────────────────────────────────────────────────
 
 type connectionStore = {
-  mutable conn: option<Sdk.connection>,
+  mutable conn: option<Sdk.connection<Sdk.remoteModule>>,
   mutable listeners: array<unit => unit>,
 }
 
@@ -78,15 +79,15 @@ module Provider = {
     useEffectOnMount(() => {
       let savedToken = _getItem(tokenKey)->Nullable.toOption
       let builder =
-        Sdk.makeDbConnectionBuilder(Schema.remoteModule, config =>
+        Normalize.makeNormalizedBuilder(Schema.remoteModule, config =>
           Sdk.makeDbConnectionImpl(config)
         )
         ->Sdk.withUri(uri)
         ->Sdk.withDatabaseName(moduleName)
         ->Sdk.withToken(savedToken)
-        ->Sdk.onConnect((_conn, identityHex, authToken) => {
+        ->Sdk.onConnect((_conn, identity, authToken) => {
           _setItem(tokenKey, authToken)
-          _setItem(identityKey, identityHex)
+          _setItem(identityKey, identity->Sdk.Identity.toHexString)
         })
         ->Sdk.onConnectError((_ctx, _error) => {
           switch savedToken {
@@ -113,7 +114,7 @@ module Provider = {
   }
 }
 
-let useConnection = (): option<Sdk.connection> => {
+let useConnection = (): option<Sdk.connection<Sdk.remoteModule>> => {
   let store = React.useContext(connectionContext)
   let subscribe = notify => {
     store.listeners = store.listeners->Array.concat([notify])
@@ -135,7 +136,7 @@ let useConnectionInfo = (): connectionInfo => {
 // ── Table config + generic useRows ────────────────────────────────────────────
 
 type tableConfig<'row> = {
-  getHandle: Sdk.connection => Obj.t,
+  getHandle: Sdk.connection<Sdk.remoteModule> => Obj.t,
   iter: Obj.t => Iterator.t<'row>,
 }
 
@@ -252,7 +253,7 @@ type mutationState<'args> = {
 }
 
 let useCallWith = (
-  callReducer: (Sdk.connection, 'args) => promise<unit>,
+  callReducer: (Sdk.connection<Sdk.remoteModule>, 'args) => promise<unit>,
 ): mutationState<'args> => {
   let conn = useConnection()
   let (isPending, setIsPending) = useState(false)
@@ -284,7 +285,7 @@ type mutationStateUnit = {
 }
 
 let useCallUnit = (
-  callReducer: Sdk.connection => promise<unit>,
+  callReducer: Sdk.connection<Sdk.remoteModule> => promise<unit>,
 ): mutationStateUnit => {
   let conn = useConnection()
   let (isPending, setIsPending) = useState(false)
@@ -319,7 +320,7 @@ type procedureState<'args, 'result> = {
 }
 
 let useCallProcedure = (
-  callProc: (Sdk.connection, 'args) => promise<'result>,
+  callProc: (Sdk.connection<Sdk.remoteModule>, 'args) => promise<'result>,
 ): procedureState<'args, 'result> => {
   let conn = useConnection()
   let (isPending, setIsPending) = useState(false)
@@ -358,7 +359,7 @@ type procedureStateUnit<'result> = {
 }
 
 let useCallProcedureUnit = (
-  callProc: Sdk.connection => promise<'result>,
+  callProc: Sdk.connection<Sdk.remoteModule> => promise<'result>,
 ): procedureStateUnit<'result> => {
   let conn = useConnection()
   let (isPending, setIsPending) = useState(false)
@@ -395,7 +396,7 @@ external toObj: 'a => Obj.t = "%identity"
 external fromObj: Obj.t => 'a = "%identity"
 
 let mkTable = (
-  getHandle: Sdk.connection => 'handle,
+  getHandle: Sdk.connection<Sdk.remoteModule> => 'handle,
   iter: 'handle => Iterator.t<'row>,
 ): tableConfig<'row> => {
   getHandle: conn => toObj(getHandle(conn)),

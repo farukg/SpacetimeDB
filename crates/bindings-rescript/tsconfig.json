@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "skipLibCheck": false,
+    "baseUrl": ".",
+    "paths": {
+      "spacetimedb": ["./node_modules/spacetimedb"],
+      "spacetimedb/*": ["./node_modules/spacetimedb/*"]
+    }
+  },
+  "include": [
+    "src/**/*.gen.tsx"
+  ],
+  "exclude": []
+}

@@ -15,9 +15,18 @@
     ],
     "suffix": ".res.mjs",
     "dependencies": [
-        "@rescript/core"
+        "@rescript/core",
+        "@rescript/react"
     ],
     "warnings": {
         "error": "+A"
+    },
+    "jsx": {
+        "version": 4
+    },
+    "gentypeconfig": {
+        "module": "esmodule",
+        "moduleResolution": "node",
+        "generatedFileExtension": ".gen.tsx"
     }
 }

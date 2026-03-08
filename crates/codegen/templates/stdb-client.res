@@ -8,4 +8,4 @@ type db = {
 }
 
 // DB access from connection
-@get external db: {{self.sdk_module}}.connection => db = "db"
+@get external db: {{self.sdk_module}}.connection<{{self.sdk_module}}.remoteModule> => db = "db"

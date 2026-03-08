@@ -11,7 +11,7 @@
 {{self.sibling_opens}}
 
 module type Config = {
-  let getConnection: unit => promise<Sdk.connection>
+  let getConnection: unit => promise<Sdk.connection<Sdk.remoteModule>>
 }
 
 module Make = (C: Config) => {

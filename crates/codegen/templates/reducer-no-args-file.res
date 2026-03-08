@@ -2,7 +2,7 @@
 {{self.sibling_opens}}
 
 @send external call_: Sdk.reducers => promise<unit> = "{{self.accessor}}"
-let call = (conn: Sdk.connection): promise<unit> =>
+let call = (conn: Sdk.connection<Sdk.remoteModule>): promise<unit> =>
   conn->Sdk.getReducers->call_
 %% if !self.make_functor.is_empty() {
 {{self.make_functor}}

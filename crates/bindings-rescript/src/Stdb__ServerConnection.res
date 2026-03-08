@@ -1,21 +1,22 @@
-// StdbServerConnection — module functor for server-side SpacetimeDB connections.
+// Stdb__ServerConnection — module functor for server-side SpacetimeDB connections.
 //
 // Usage:
 //   module Config = {
-//     let remoteModule = StdbSchema.remoteModule
-//     let allTableNames = StdbSchema.allTableNames
+//     let remoteModule = Stdb__Schema.remoteModule
+//     let allTableNames = Stdb__Schema.allTableNames
 //     let databaseName = Env.spacetimedbDatabase
 //     let uri = Env.spacetimedbUri
 //     let connectTimeoutMs = 10000
 //   }
-//   module ServerConn = StdbServerConnection.Make(Config)
+//   module ServerConn = Stdb__ServerConnection.Make(Config)
 //   let conn = await ServerConn.getConnection()
 
 @@warning("-44")
-open Stdb__Sdk
+open Stdb__SdkBindings
 
 module type Config = {
-  let remoteModule: remoteModule
+  type rm
+  let remoteModule: Stdb__Sdk.remoteModule
   let allTableNames: array<string>
   let databaseName: string
   let uri: string
@@ -23,7 +24,9 @@ module type Config = {
 }
 
 module type S = {
-  let getConnection: unit => promise<connection>
+  type rm
+  let getConnection: unit => promise<dbConnectionImpl<rm>>
+  let getConnectionWithToken: option<string> => promise<dbConnectionImpl<rm>>
   let resetForTests: unit => unit
 }
 
@@ -48,48 +51,42 @@ let withTimeout = (connectionPromise, timeoutMs) =>
     promiseRace([connectionPromise, timeoutPromise])
   }
 
-module Make = (C: Config): S => {
-  let connectionRef: ref<option<connection>> = ref(None)
-  let promiseRef: ref<option<promise<connection>>> = ref(None)
+// Shared connect logic — parametric over optional token.
+let connectWithConfig = (
+  ~remoteModule: Stdb__Sdk.remoteModule,
+  ~uri,
+  ~databaseName,
+  ~allTableNames,
+  ~token,
+  ~timeoutMs,
+) => {
+  let connectPromise = Promise.make((resolve, reject) => {
+    let settled = ref(false)
 
-  let disconnectIfActive = () =>
-    switch connectionRef.contents {
-    | Some(conn) if conn->isActive => conn->disconnect
-    | Some(_) | None => ()
-    }
+    let resolveOnce = conn =>
+      switch settled.contents {
+      | true => ()
+      | false =>
+        settled := true
+        resolve(conn)
+      }
 
-  let connect = () => {
+    let rejectOnce = error =>
+      switch settled.contents {
+      | true => ()
+      | false =>
+        settled := true
+        reject(toExn(error))
+      }
+
     let builder =
-      makeDbConnectionBuilder(C.remoteModule, dbConfig => makeDbConnectionImpl(dbConfig))
-      ->withUri(C.uri)
-      ->withDatabaseName(C.databaseName)
-
-    let connectPromise = Promise.make((resolve, reject) => {
-      let settled = ref(false)
-
-      let resolveOnce = conn => {
-        switch settled.contents {
-        | true => ()
-        | false =>
-          settled := true
-          resolve(conn)
-        }
-      }
-
-      let rejectOnce = error => {
-        switch settled.contents {
-        | true => ()
-        | false =>
-          settled := true
-          disconnectIfActive()
-          reject(toExn(error))
-        }
-      }
-
-      builder
-      ->onConnect((conn, _identity, _token) => {
+      Stdb__Normalize.makeNormalizedBuilder(remoteModule, dbConfig => makeDbConnectionImpl(dbConfig))
+      ->withUri(uri)
+      ->withDatabaseName(databaseName)
+      ->withToken(token)
+      ->onConnect((conn, _identity, _authToken) => {
         try {
-          switch C.allTableNames {
+          switch allTableNames {
           | tables if tables->Array.length > 0 =>
             let queries = tables->Array.map(tableName => `SELECT * FROM ${tableName}`)
             conn
@@ -97,6 +94,7 @@ module Make = (C: Config): S => {
             ->onApplied(() => resolveOnce(conn))
             ->onSubError((_ctx, error) => rejectOnce(error->Obj.magic))
             ->subscribe(queries)
+            ->ignore
           | _ => resolveOnce(conn)
           }
         } catch {
@@ -105,26 +103,43 @@ module Make = (C: Config): S => {
         }
       })
       ->onConnectError((_ctx, error) => rejectOnce(error->Obj.magic))
-      ->ignore
 
-      try {
-        let conn = builder->buildConnection
-        connectionRef := Some(conn)
-      } catch {
-      | JsExn(jsExn) => rejectOnce(jsExn->Obj.magic)
-      | exn => rejectOnce(exn->Obj.magic)
-      }
-    })
+    try {
+      builder->build->ignore
+    } catch {
+    | JsExn(jsExn) => rejectOnce(jsExn->Obj.magic)
+    | exn => rejectOnce(exn->Obj.magic)
+    }
+  })
 
-    connectPromise->withTimeout(C.connectTimeoutMs)
-  }
+  connectPromise->withTimeout(timeoutMs)
+}
+
+module Make = (C: Config): (S with type rm = C.rm) => {
+  type rm = C.rm
+
+  // Default (tokenless) singleton connection
+  let promiseRef: ref<option<promise<dbConnectionImpl<rm>>>> = ref(None)
+
+  // Token-keyed connection pool
+  let tokenPool: Dict.t<promise<dbConnectionImpl<rm>>> = Dict.make()
+
+  let connectOne = (~token) =>
+    connectWithConfig(
+      ~remoteModule=C.remoteModule,
+      ~uri=C.uri,
+      ~databaseName=C.databaseName,
+      ~allTableNames=C.allTableNames,
+      ~token,
+      ~timeoutMs=C.connectTimeoutMs,
+    )
 
   let getConnection = () =>
     switch promiseRef.contents {
     | Some(existingPromise) => existingPromise
     | None =>
       let p =
-        connect()->Promise.catch(error => {
+        connectOne(~token=None)->Promise.catch(error => {
           promiseRef := None
           throw(error)
         })
@@ -132,9 +147,25 @@ module Make = (C: Config): S => {
       p
     }
 
+  let getConnectionWithToken = token => {
+    let key = switch token {
+    | Some(t) => t
+    | None => "__anonymous__"
+    }
+    switch tokenPool->Dict.get(key) {
+    | Some(existing) => existing
+    | None =>
+      let p =
+        connectOne(~token)->Promise.catch(error => {
+          tokenPool->Dict.delete(key)
+          throw(error)
+        })
+      tokenPool->Dict.set(key, p)
+      p
+    }
+  }
+
   let resetForTests = () => {
-    disconnectIfActive()
-    connectionRef := None
     promiseRef := None
   }
 }

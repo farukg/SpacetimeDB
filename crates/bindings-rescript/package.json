@@ -5,10 +5,12 @@
     "author": "Clockwork Labs",
     "license": "ISC",
     "type": "module",
-    "main": "src/js_exports.mjs",
+    "main": "src/Stdb__Sdk.res.mjs",
     "exports": {
-        ".": "./src/js_exports.mjs",
-        "./react": "./src/js_react_exports.mjs",
+        ".": "./src/Stdb__Sdk.res.mjs",
+        "./bindings": "./src/Stdb__SdkBindings.res.mjs",
+        "./normalize": "./src/Stdb__Normalize.res.mjs",
+        "./connection": "./src/Stdb__ServerConnection.res.mjs",
         "./src/*": "./src/*"
     },
     "files": [
@@ -22,11 +24,16 @@
         "watch": "rescript build -w"
     },
     "peerDependencies": {
-        "rescript": "^12.0.0",
-        "react": "^18.0.0 || ^19.0.0"
+        "react": "^18.0.0 || ^19.0.0",
+        "rescript": "^12.0.0"
     },
     "dependencies": {
         "@rescript/core": "^1.6.0",
+        "@rescript/react": "^0.13.0",
         "spacetimedb": "2.0.0"
+    },
+    "devDependencies": {
+        "@types/node": "^25.3.5",
+        "typescript": "^5.9.3"
     }
 }

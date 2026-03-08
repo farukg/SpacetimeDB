@@ -19,5 +19,5 @@ type procedures = {
 %% }
 }
 
-@get external reducers: {{self.sdk_module}}.connection => reducers = "reducers"
-@get external procedures: {{self.sdk_module}}.connection => procedures = "procedures"
+@get external reducers: {{self.sdk_module}}.connection<{{self.sdk_module}}.remoteModule> => reducers = "reducers"
+@get external procedures: {{self.sdk_module}}.connection<{{self.sdk_module}}.remoteModule> => procedures = "procedures"
