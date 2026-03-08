@@ -1,5 +1,5 @@
 # SpacetimeDB Fork CI
-# Builds spacetimedb-cli, spacetimedb-standalone, and ReScript SDK,
+# Builds spacetimedb-cli, spacetimedb-standalone, TypeScript SDK, and ReScript SDK,
 # publishes to GitLab Generic Package Registry, and creates a git tag.
 #
 # Trigger: any branch push to GitLab
@@ -66,9 +66,17 @@ build_fork:
       MNT=$(sudo buildah mount "$CTR")
       sudo cp "$MNT/spacetimedb-cli" artifacts/
       sudo cp "$MNT/spacetimedb-standalone" artifacts/
-      sudo bash -c "cp \"$MNT\"/spacetimedb-rescript-*.tgz artifacts/"
+      sudo bash -c "cp \"$MNT\"/*.tgz artifacts/"
       sudo buildah unmount "$CTR"
       sudo buildah rm "$CTR"
+
+    - |
+      echo "--- Renaming SDK tarballs with commit hash ---"
+      SHA="${CI_COMMIT_SHORT_SHA}"
+      for TGZ in artifacts/*.tgz; do
+        BASE=$(basename "$TGZ" .tgz)
+        mv "$TGZ" "artifacts/${BASE}-${SHA}.tgz"
+      done
 
     - |
       echo "--- Artifacts ---"

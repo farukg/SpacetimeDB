@@ -710,7 +710,7 @@ ${ty.variants
     ({ name }, i) => `\
   case ${JSON.stringify(name!)}:
     writer.writeByte(${i});
-    return this.${name!}(writer, typeof value === 'object' ? value.value : undefined);`
+    return this.${name!}(writer, typeof value === 'object' ? (value.value !== undefined ? value.value : value._0) : undefined);`
   )
   .join('\n')}
   default:
@@ -832,7 +832,7 @@ ${ty.variants
         `switch (reader.readU8()) {\n${ty.variants
           .map(
             ({ name }, i) =>
-              `case ${i}: return { tag: ${JSON.stringify(name!)}, value: this.${name!}(reader) };`
+              `case ${i}: { const v = this.${name!}(reader); return { tag: ${JSON.stringify(name!)}, value: v, _0: v }; }`
           )
           .join('\n')} }`
       ).bind(deserializers) as Deserializer<any>;

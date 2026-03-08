@@ -37,13 +37,13 @@ export type scheduleAt =
     { tag: "Interval"; readonly value: timeDuration }
   | { tag: "Time"; readonly value: timestamp };
 
-export type dbConnectionBuilder<conn extends import("spacetimedb").DbConnectionImpl<any>> = $$dbConnectionBuilder<conn>;
+export type dbConnectionBuilder<conn> = $$dbConnectionBuilder<conn>;
 
-export type dbConnectionImpl<rm extends import("spacetimedb/dist/sdk/spacetime_module").UntypedRemoteModule> = $$dbConnectionImpl<rm>;
+export type dbConnectionImpl<rm> = $$dbConnectionImpl<rm>;
 
-export type subscriptionBuilder<rm extends import("spacetimedb/dist/sdk/spacetime_module").UntypedRemoteModule> = $$subscriptionBuilder<rm>;
+export type subscriptionBuilder<rm> = $$subscriptionBuilder<rm>;
 
-export type subscriptionHandle<rm extends import("spacetimedb/dist/sdk/spacetime_module").UntypedRemoteModule> = $$subscriptionHandle<rm>;
+export type subscriptionHandle<rm> = $$subscriptionHandle<rm>;
 
 export type React_props<connectionBuilder,children> = { readonly connectionBuilder: connectionBuilder; readonly children: children };
 

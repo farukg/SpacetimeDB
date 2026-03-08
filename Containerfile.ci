@@ -13,7 +13,7 @@
 #   Phase 4 — Real source build
 #     COPY . . (full source); busts on source changes.
 #     Cargo only recompiles workspace crates (~30s), all external deps cached.
-#   Phase 5 — ReScript SDK build
+#   Phase 5 — SDK packages (TypeScript + ReScript)
 
 # ── Phase 1: Stable tooling ────────────────────────────────────────────────────
 FROM rust:1.93-bookworm AS builder
@@ -109,7 +109,14 @@ RUN sed -i '/^\[patch\./,$d' Cargo.toml
 # Build both targets in one invocation — shared dep graph, max parallelism
 RUN cargo build --release -p spacetimedb-cli -p spacetimedb-standalone
 
-# ── Phase 5: ReScript SDK ──────────────────────────────────────────────────────
+# ── Phase 5: SDK packages ──────────────────────────────────────────────────────
+# TypeScript SDK — needs build (dist/ not committed); skip tests/size-limit.
+WORKDIR /build/crates/bindings-typescript
+RUN npm install --ignore-scripts 2>/dev/null || true
+RUN npx tsup && npx tsc -p tsconfig.build.json
+RUN npm pack
+
+# ReScript SDK — needs rescript compile before pack.
 WORKDIR /build/crates/bindings-rescript
 RUN npm install --ignore-scripts 2>/dev/null || true
 RUN npx rescript clean && npx rescript build
@@ -119,4 +126,5 @@ RUN npm pack
 FROM scratch AS artifacts
 COPY --from=builder /build/target/release/spacetimedb-cli /spacetimedb-cli
 COPY --from=builder /build/target/release/spacetimedb-standalone /spacetimedb-standalone
+COPY --from=builder /build/crates/bindings-typescript/spacetimedb-*.tgz /
 COPY --from=builder /build/crates/bindings-rescript/spacetimedb-rescript-*.tgz /
