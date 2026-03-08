@@ -111,8 +111,12 @@ RUN cargo build --release -p spacetimedb-cli -p spacetimedb-standalone
 
 # ── Phase 5: SDK packages ──────────────────────────────────────────────────────
 # TypeScript SDK — needs build (dist/ not committed); skip tests/size-limit.
+# npm install pulls deps + devDeps (tsup, typescript, etc).
+# Optional peerDeps (vue, svelte, @angular/core) must be installed explicitly
+# so tsc can emit .d.ts declaration files for framework-specific bindings.
 WORKDIR /build/crates/bindings-typescript
 RUN npm install --ignore-scripts 2>/dev/null || true
+RUN npm install --no-save vue svelte @angular/core @angular/compiler 2>/dev/null || true
 RUN npx tsup && npx tsc -p tsconfig.build.json
 RUN npm pack
 
