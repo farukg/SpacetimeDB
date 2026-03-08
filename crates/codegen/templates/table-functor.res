@@ -8,12 +8,12 @@
 module type TABLE = {
   type t
   type handle
-  let onInsert: (handle, (Sdk.eventCtx, t) => unit) => unit
-  let removeOnInsert: (handle, (Sdk.eventCtx, t) => unit) => unit
-  let onUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit
-  let removeOnUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit
-  let onDelete: (handle, (Sdk.eventCtx, t) => unit) => unit
-  let removeOnDelete: (handle, (Sdk.eventCtx, t) => unit) => unit
+  let onInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit
+  let removeOnInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit
+  let onUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit
+  let removeOnUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit
+  let onDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit
+  let removeOnDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit
 }
 
 // ── Make functor ──────────────────────────────────────────────────────────────

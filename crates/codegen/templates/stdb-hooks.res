@@ -242,7 +242,6 @@ let _fireAndForget: (promise<unit>, exn => unit) => unit = %raw(`
 `)
 
 type reducerError = {
-  raw: exn,
   message: string,
 }
 
@@ -268,7 +267,7 @@ let useCallWith = (
         callReducer(c, args),
         e => {
           setIsPending(_ => false)
-          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
+          setError(_ => Some({message: _exnToMessage(e)}))
         },
       )
     | None => Console.warn("Hooks.useCallWith: no connection")
@@ -300,7 +299,7 @@ let useCallUnit = (
         callReducer(c),
         e => {
           setIsPending(_ => false)
-          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
+          setError(_ => Some({message: _exnToMessage(e)}))
         },
       )
     | None => Console.warn("Hooks.useCallUnit: no connection")
@@ -341,7 +340,7 @@ let useCallProcedure = (
         }),
         e => {
           setIsPending(_ => false)
-          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
+          setError(_ => Some({message: _exnToMessage(e)}))
         },
       )
     | None => Console.warn("Hooks.useCallProcedure: no connection")
@@ -380,7 +379,7 @@ let useCallProcedureUnit = (
         }),
         e => {
           setIsPending(_ => false)
-          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
+          setError(_ => Some({message: _exnToMessage(e)}))
         },
       )
     | None => Console.warn("Hooks.useCallProcedureUnit: no connection")
@@ -411,7 +410,17 @@ module Subscriptions = {
     ~onUpdate: (Sdk.eventCtx, 'row, 'row) => unit,
     ~onDelete: (Sdk.eventCtx, 'row) => unit,
   ): (unit => unit) => {
-    ignore((handle, onInsert, onUpdate, onDelete))
-    () => ()
+    let h = toObj(handle)->asHandleLike
+    let insertCb = (ctx, row) => onInsert(fromObj(ctx), fromObj(row))
+    let updateCb = (ctx, prev, next) => onUpdate(fromObj(ctx), fromObj(prev), fromObj(next))
+    let deleteCb = (ctx, row) => onDelete(fromObj(ctx), fromObj(row))
+    h->_onInsert(insertCb)
+    h->_onUpdate(updateCb)
+    h->_onDelete(deleteCb)
+    () => {
+      h->_removeOnInsert(insertCb)
+      h->_removeOnUpdate(updateCb)
+      h->_removeOnDelete(deleteCb)
+    }
   }
 }

@@ -8,12 +8,12 @@ type handle
 
 @send external iter: handle => Iterator.t<t> = "iter"
 
-@send external onInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "onInsert"
-@send external removeOnInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
-@send external onUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
-@send external removeOnUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
-@send external onDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "onDelete"
-@send external removeOnDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
+@send external onInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onInsert"
+@send external removeOnInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
+@send external onUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
+@send external removeOnUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
+@send external onDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onDelete"
+@send external removeOnDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
 
 %% if !self.pk_section.is_empty() {
 {{self.pk_section}}

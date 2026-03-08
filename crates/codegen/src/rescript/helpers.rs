@@ -115,7 +115,12 @@ pub fn render_res_type(module: &ModuleDef, ty: &AlgebraicTypeUse, style: TypeRef
         AlgebraicTypeUse::Result { ok_ty, err_ty } => {
             let ok_str = render_res_type(module, ok_ty, style, root_module);
             let err_str = render_res_type(module, err_ty, style, root_module);
-            format!("result<{ok_str}, {err_str}>")
+            let safe_err = if matches!(err_ty.as_ref(), AlgebraicTypeUse::String) {
+                format!("option<{err_str}>")
+            } else {
+                err_str
+            };
+            format!("result<{ok_str}, {safe_err}>")
         }
         AlgebraicTypeUse::Primitive(prim) => match prim {
             PrimitiveType::Bool => "bool".to_string(),
