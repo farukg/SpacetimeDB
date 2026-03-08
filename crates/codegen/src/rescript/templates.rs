@@ -486,6 +486,8 @@ pub(super) struct StdbSchemaRes<'a> {
     pub procedure_entries: Vec<SchemaProcedureEntryRes<'a>>,
     /// Comma-separated list of all table accessor names for allTableNames.
     pub all_table_names: Vec<&'a str>,
+    /// Non-event tables/views — safe to subscribe to via `SELECT * FROM`.
+    pub subscribable_table_names: Vec<&'a str>,
     pub sdk_module: &'a str,
 }
 

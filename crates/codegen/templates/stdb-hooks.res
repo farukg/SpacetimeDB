@@ -44,11 +44,13 @@ external useMemo0: (unit => 'a) => 'a = "useMemo"
 
 type connectionStore = {
   mutable conn: option<Sdk.connection<Sdk.remoteModule>>,
+  mutable subscriptionReady: bool,
   mutable listeners: array<unit => unit>,
 }
 
 let connectionContext: React.Context.t<connectionStore> = React.createContext({
   conn: None,
+  subscriptionReady: false,
   listeners: [],
 })
 
@@ -73,11 +75,13 @@ module Provider = {
   let make = (~uri: string, ~moduleName: string, ~children: React.element) => {
     let store = useMemo0(() => ({
       conn: None,
+      subscriptionReady: false,
       listeners: [],
     }: connectionStore))
 
     useEffectOnMount(() => {
       let savedToken = _getItem(tokenKey)->Nullable.toOption
+      let notify = () => store.listeners->Array.forEach(fn => fn())
       let builder =
         Normalize.makeNormalizedBuilder(Schema.remoteModule, config =>
           Sdk.makeDbConnectionImpl(config)
@@ -85,9 +89,25 @@ module Provider = {
         ->Sdk.withUri(uri)
         ->Sdk.withDatabaseName(moduleName)
         ->Sdk.withToken(savedToken)
-        ->Sdk.onConnect((_conn, identity, authToken) => {
+        ->Sdk.onConnect((conn, identity, authToken) => {
           _setItem(tokenKey, authToken)
           _setItem(identityKey, identity->Sdk.Identity.toHexString)
+          // Connection available immediately (procedures work before subscription)
+          store.conn = Some(conn)
+          notify()
+          // Subscribe to all non-event tables/views
+          let queries = Schema.subscribableTableNames->Array.map(t => `SELECT * FROM ${t}`)
+          conn
+          ->Sdk.subscriptionBuilder
+          ->Sdk.onApplied(_ctx => {
+            store.subscriptionReady = true
+            notify()
+          })
+          ->Sdk.onSubError((_ctx, _error) => {
+            Console.error("SpacetimeDB subscription error")
+          })
+          ->Sdk.subscribe(queries)
+          ->ignore
         })
         ->Sdk.onConnectError((_ctx, _error) => {
           switch savedToken {
@@ -98,14 +118,13 @@ module Provider = {
           }
         })
 
-      let conn = builder->Sdk.buildConnection
-      store.conn = Some(conn)
-      store.listeners->Array.forEach(fn => fn())
+      builder->Sdk.buildConnection->ignore
 
       Some(
         () => {
           store.conn = None
-          store.listeners->Array.forEach(fn => fn())
+          store.subscriptionReady = false
+          notify()
         },
       )
     })
@@ -126,11 +145,12 @@ let useConnection = (): option<Sdk.connection<Sdk.remoteModule>> => {
   useSyncExternalStore(subscribe, getSnapshot, ~getServerSnapshot=() => None)
 }
 
-type connectionInfo = {isActive: bool}
+type connectionInfo = {isActive: bool, subscriptionReady: bool}
 
 let useConnectionInfo = (): connectionInfo => {
   let conn = useConnection()
-  {isActive: conn->Option.isSome}
+  let store = React.useContext(connectionContext)
+  {isActive: conn->Option.isSome, subscriptionReady: store.subscriptionReady}
 }
 
 // ── Table config + generic useRows ────────────────────────────────────────────

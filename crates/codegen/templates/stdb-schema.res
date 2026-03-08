@@ -36,5 +36,14 @@ let allTableNames = [
 %% }
 ]
 
+// Non-event tables/views — safe for client subscription via SELECT * FROM.
+// Event tables (document_request, notification_event, etc.) are excluded because
+// they are broadcast-only and cannot be subscribed to.
+let subscribableTableNames = [
+%% for name in &self.subscribable_table_names {
+  "{{name}}",
+%% }
+]
+
 let tables = makeQueryBuilder({tables: remoteModule.tables})
 let reducers = convertToAccessorMap(remoteModule.reducers)

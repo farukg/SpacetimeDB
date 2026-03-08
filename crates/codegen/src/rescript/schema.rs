@@ -157,6 +157,13 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
 
     let all_table_names: Vec<&str> = all_entry_data.iter().map(|d| d.accessor_name.as_str()).collect();
 
+    // Non-event tables/views — safe for client subscription via SELECT * FROM.
+    let subscribable_table_names: Vec<&str> = all_entry_data
+        .iter()
+        .filter(|d| !d.is_event)
+        .map(|d| d.accessor_name.as_str())
+        .collect();
+
     // ── Reducer entries ──────────────────────────────────────────────
     let reducer_data: Vec<ReducerEntryData> = iter_reducers(module, options.visibility)
         .filter(|r| is_reducer_invokable(r))
@@ -248,6 +255,7 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
             reducer_entries,
             procedure_entries,
             all_table_names,
+            subscribable_table_names,
         }
         .to_string(),
     }
