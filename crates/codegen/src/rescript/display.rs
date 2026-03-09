@@ -9,8 +9,8 @@
 
 use super::helpers::{rescript_constructor_name, rescript_field_name, rescript_module_name, sibling_opens};
 use super::templates::{
-    AutoGenHeaderRes, DisplayEnumArmRes, DisplayEnumFromStringArmRes, DisplayEnumFromStringRes, DisplayEnumToStringRes,
-    DisplaySumPayloadArmRes, DisplaySumToStringRes, DisplaySumUnitArmRes, DisplayUnwrapperRes, StdbDisplayRes,
+    AutoGenHeaderRes, DisplayEnumArmRes, DisplayEnumFromStringArmRes, DisplaySumPayloadArmRes, DisplaySumUnitArmRes,
+    DisplayUnwrapperRes, StdbDisplayRes, SwitchFunctionRes,
 };
 use crate::util::{iter_types, type_ref_name};
 use crate::OutputFile;
@@ -98,37 +98,47 @@ pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> Ou
     let mut enum_to_strings = String::new();
     let mut enum_from_strings = String::new();
     for data in &enum_data {
-        let to_arms: Vec<DisplayEnumArmRes> = data
+        let to_arm_strings: Vec<String> = data
             .constructors
             .iter()
             .map(|c| DisplayEnumArmRes {
                 module_name: &data.module_name,
                 constructor: c,
             })
+            .map(|arm| arm.to_string())
             .collect();
+        let to_arm_refs: Vec<&str> = to_arm_strings.iter().map(|s| s.as_str()).collect();
         enum_to_strings.push_str(
-            &DisplayEnumToStringRes {
+            &SwitchFunctionRes {
                 fn_name: &data.fn_name,
-                module_name: &data.module_name,
-                arms: to_arms,
+                input_type: &format!("Types.{}.t", data.module_name),
+                output_type: "string",
+                arms: to_arm_refs,
+                has_fallback: false,
+                fallback_arm: "",
             }
             .to_string(),
         );
 
         let from_fn_name = data.fn_name.replace("ToString", "FromString");
-        let from_arms: Vec<DisplayEnumFromStringArmRes> = data
+        let from_arm_strings: Vec<String> = data
             .constructors
             .iter()
             .map(|c| DisplayEnumFromStringArmRes {
                 module_name: &data.module_name,
                 constructor: c,
             })
+            .map(|arm| arm.to_string())
             .collect();
+        let from_arm_refs: Vec<&str> = from_arm_strings.iter().map(|s| s.as_str()).collect();
         enum_from_strings.push_str(
-            &DisplayEnumFromStringRes {
+            &SwitchFunctionRes {
                 fn_name: &from_fn_name,
-                module_name: &data.module_name,
-                arms: from_arms,
+                input_type: "string",
+                output_type: &format!("option<Types.{}.t>", data.module_name),
+                arms: from_arm_refs,
+                has_fallback: true,
+                fallback_arm: "  | _ => None",
             }
             .to_string(),
         );
@@ -210,10 +220,13 @@ pub(super) fn generate_display_file(module: &ModuleDef, root_module: &str) -> Ou
             .collect();
         let arm_refs: Vec<&str> = arm_strings.iter().map(|s| s.as_str()).collect();
         sum_to_strings.push_str(
-            &DisplaySumToStringRes {
+            &SwitchFunctionRes {
                 fn_name: &data.fn_name,
-                module_name: &data.module_name,
+                input_type: &format!("Types.{}.t", data.module_name),
+                output_type: "string",
                 arms: arm_refs,
+                has_fallback: false,
+                fallback_arm: "",
             }
             .to_string(),
         );

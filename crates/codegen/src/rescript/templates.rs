@@ -16,7 +16,8 @@
 use boilerplate::Boilerplate;
 
 pub(super) use sigma_rescript_codegen::templates::{
-    AutoGenHeaderRes, EffectCallMakeFunctorRes, ModuleAliasRes, ModuleTypeAliasRes, ModuleWrapperRes, NewtypeHelpersRes,
+    AutoGenHeaderRes, EffectCallMakeFunctorRes, ModuleAliasRes, ModuleTypeAliasRes, ModuleWrapperRes,
+    NewtypeHelpersRes, SwitchFunctionRes,
 };
 
 // ===========================================================================
@@ -280,37 +281,12 @@ pub(super) struct DisplayUnwrapperRes<'a> {
     pub field_name: &'a str,
 }
 
-/// A single enum toString function with switch arms.
-#[derive(Boilerplate)]
-pub(super) struct DisplayEnumToStringRes<'a> {
-    pub fn_name: &'a str,
-    pub module_name: &'a str,
-    pub arms: Vec<DisplayEnumArmRes<'a>>,
-}
-
-/// A Sum enum toString function with mixed unit/payload arms.
-/// Arms are pre-rendered strings (mix of DisplaySumUnitArmRes and DisplaySumPayloadArmRes).
-#[derive(Boilerplate)]
-pub(super) struct DisplaySumToStringRes<'a> {
-    pub fn_name: &'a str,
-    pub module_name: &'a str,
-    pub arms: Vec<&'a str>,
-}
-
 /// A single match arm in an enum fromString function.
 /// Renders: `  | "Constructor" => Some(Constructor)`
 #[derive(Boilerplate)]
 pub(super) struct DisplayEnumFromStringArmRes<'a> {
     pub module_name: &'a str,
     pub constructor: &'a str,
-}
-
-/// A single enum fromString function with switch arms + catch-all.
-#[derive(Boilerplate)]
-pub(super) struct DisplayEnumFromStringRes<'a> {
-    pub fn_name: &'a str,
-    pub module_name: &'a str,
-    pub arms: Vec<DisplayEnumFromStringArmRes<'a>>,
 }
 
 // ===========================================================================
