@@ -17,7 +17,7 @@ use boilerplate::Boilerplate;
 
 pub(super) use sigma_rescript_codegen::templates::{
     AutoGenHeaderRes, EffectCallMakeFunctorRes, ModuleAliasRes, ModuleTypeAliasRes, ModuleWrapperRes,
-    NewtypeHelpersRes, SwitchFunctionRes,
+    NamespaceGatewayRes, NewtypeHelpersRes, SwitchFunctionRes,
 };
 
 // ===========================================================================
@@ -134,14 +134,6 @@ pub(super) struct StdbApiRes<'a> {
     pub reducer_fields: Vec<ReducerFieldRes<'a>>,
     pub procedure_fields: Vec<ProcedureFieldRes<'a>>,
     pub sdk_module: &'a str,
-}
-
-/// Namespace gateway file (root, tables, reducers, procedures).
-/// Renders a flat list of module aliases.
-#[derive(Boilerplate)]
-pub(super) struct NamespaceGatewayRes<'a> {
-    pub header: AutoGenHeaderRes,
-    pub aliases: Vec<ModuleAliasRes<'a>>,
 }
 
 /// Per-table file: `Stdb__Tables__*.res`.
