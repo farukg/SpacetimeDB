@@ -8,6 +8,7 @@
 module type TABLE = {
   type t
   type handle
+  let iter: handle => Iterator.t<t>
   let onInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit
   let removeOnInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit
   let onUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit
@@ -19,10 +20,40 @@ module type TABLE = {
 // ── Make functor ──────────────────────────────────────────────────────────────
 // Produces: type event, let subscribe, module MakeStream
 module Make = (T: TABLE) => {
+  let rows = (handle: T.handle): array<T.t> => handle->T.iter->Array.fromIterator
   type event =
     | Inserted({row: T.t})
     | Updated({prev: T.t, next: T.t})
     | Deleted({row: T.t})
+
+  let watchInsert = (handle: T.handle, callback: unit => unit) => {
+    let insertCb = (_ctx: Sdk.eventCtx, _row: T.t) => callback()
+    T.onInsert(handle, insertCb)
+    () => T.removeOnInsert(handle, insertCb)
+  }
+
+  let watchUpdate = (handle: T.handle, callback: unit => unit) => {
+    let updateCb = (_ctx: Sdk.eventCtx, _prev: T.t, _next: T.t) => callback()
+    T.onUpdate(handle, updateCb)
+    () => T.removeOnUpdate(handle, updateCb)
+  }
+
+  let watchDelete = (handle: T.handle, callback: unit => unit) => {
+    let deleteCb = (_ctx: Sdk.eventCtx, _row: T.t) => callback()
+    T.onDelete(handle, deleteCb)
+    () => T.removeOnDelete(handle, deleteCb)
+  }
+
+  let onChange = (handle: T.handle, callback: unit => unit) => {
+    let removeInsert = watchInsert(handle, callback)
+    let removeUpdate = watchUpdate(handle, callback)
+    let removeDelete = watchDelete(handle, callback)
+    () => {
+      removeInsert()
+      removeUpdate()
+      removeDelete()
+    }
+  }
 
   let subscribe = (handle: T.handle, handler: event => unit): (unit => unit) => {
     let insertCb = (_ctx: Sdk.eventCtx, row: T.t) => handler(Inserted({row: row}))

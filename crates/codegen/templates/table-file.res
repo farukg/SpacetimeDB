@@ -26,6 +26,7 @@ let tableName = "{{self.table_name}}"
 include TableFunctor.Make({
   type t = t
   type handle = handle
+  let iter = iter
   let onInsert = onInsert
   let removeOnInsert = removeOnInsert
   let onUpdate = onUpdate
