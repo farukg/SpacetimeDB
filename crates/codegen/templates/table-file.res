@@ -20,9 +20,24 @@ type handle
 
 %% }
 let tableName = "{{self.table_name}}"
+%% if self.uses_functor {
+
+// ── Shared boilerplate via functor ────────────────────────────────────────────
+include TableFunctor.Make({
+  type t = t
+  type handle = handle
+  let onInsert = onInsert
+  let removeOnInsert = removeOnInsert
+  let onUpdate = onUpdate
+  let removeOnUpdate = removeOnUpdate
+  let onDelete = onDelete
+  let removeOnDelete = removeOnDelete
+})
+%% } else {
 {{self.event_section}}
 %% if !self.observer_section.is_empty() {
 {{self.observer_section}}
+%% }
 %% }
 %% if !self.display_section.is_empty() {
 {{self.display_section}}

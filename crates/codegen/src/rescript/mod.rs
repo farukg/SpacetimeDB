@@ -42,7 +42,7 @@ use helpers::{
 use templates::{
     AutoGenHeaderRes, EffectCallMakeFunctorRes, PkIndexSectionRes, ProcedureFileRes, ReducerFileRes,
     ReducerReactHookSectionRes, ReducerServerFileRes, StdbAsyncRes, TableEventSectionRes, TableFileRes,
-    TableFunctorFileRes, TableFunctorRes, TableObserverSectionRes, TableReactHookSectionRes,
+    TableFunctorRes, TableObserverSectionRes, TableReactHookSectionRes,
 };
 
 use convert_case::{Case, Casing};
@@ -161,11 +161,14 @@ impl Lang for ReScript {
 
                 OutputFile {
                     filename: format!("{}.res", table_module_name(root_module, &table.accessor_name)),
-                    code: TableFunctorFileRes {
+                    code: TableFileRes {
                         header: AutoGenHeaderRes,
+                        uses_functor: true,
                         row_type: row_type.trim_end(),
                         pk_section,
                         table_name: &table.name,
+                        event_section: "",
+                        observer_section: "",
                         react_hooks,
                         display_section: &display_section,
                         sibling_opens: &table_opens,
@@ -204,6 +207,7 @@ impl Lang for ReScript {
                     filename: format!("{}.res", table_module_name(root_module, &table.accessor_name)),
                     code: TableFileRes {
                         header: AutoGenHeaderRes,
+                        uses_functor: false,
                         row_type: row_type.trim_end(),
                         pk_section,
                         table_name: &table.name,

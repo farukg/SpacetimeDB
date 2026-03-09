@@ -140,14 +140,16 @@ pub(super) struct StdbApiRes<'a> {
 #[derive(Boilerplate)]
 pub(super) struct TableFileRes<'a> {
     pub header: AutoGenHeaderRes,
+    pub uses_functor: bool,
     /// Pre-rendered row record type block.
     pub row_type: &'a str,
     /// Pre-rendered PK index section, or empty string if no PK.
     pub pk_section: &'a str,
     pub table_name: &'a str,
-    /// Pre-rendered typed event union + subscribe (always present).
+    /// Pre-rendered typed event union + subscribe (inline mode only).
     pub event_section: &'a str,
     /// Pre-rendered observer functor section, or empty string when async_style = Promise.
+    /// Inline mode only.
     pub observer_section: &'a str,
     /// Pre-rendered React hooks section, or empty string when async_style = Observer.
     pub react_hooks: &'a str,
@@ -472,23 +474,6 @@ pub(super) struct TableFunctorRes {
     pub sibling_opens: String,
     /// Whether to emit observer MakeStream section (async_style ∈ {Observer, All}).
     pub has_observer: bool,
-}
-
-/// Per-table file in functor mode: thin wrapper with `include TableFunctor.Make(...)`.
-#[derive(Boilerplate)]
-pub(super) struct TableFunctorFileRes<'a> {
-    pub header: AutoGenHeaderRes,
-    /// Pre-rendered row record type block.
-    pub row_type: &'a str,
-    /// Pre-rendered PK index section, or empty string if no PK.
-    pub pk_section: &'a str,
-    pub table_name: &'a str,
-    /// Pre-rendered React hooks section, or empty string when async_style = Observer.
-    pub react_hooks: &'a str,
-    /// Pre-rendered display projection section, or empty string if unit type.
-    pub display_section: &'a str,
-    /// Pre-rendered `module Alias = Root__Alias` lines.
-    pub sibling_opens: &'a str,
 }
 
 // ===========================================================================
