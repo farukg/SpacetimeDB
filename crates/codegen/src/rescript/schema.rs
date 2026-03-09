@@ -14,9 +14,8 @@
 
 use super::helpers::{render_schema_alg_type, rescript_constructor_name, schema_type_binding_name};
 use super::templates::{
-    AutoGenHeaderRes, SchemaColumnEntryRes, SchemaConstraintEntryRes, SchemaIndexEntryRes, SchemaProcedureEntryRes,
-    SchemaProductBindingRes, SchemaProductElementRes, SchemaReducerEntryRes, SchemaSumBindingRes, SchemaTableEntryRes,
-    SchemaVariantElementRes, StdbSchemaRes,
+    AutoGenHeaderRes, SchemaColumnEntryRes, SchemaCompoundBindingRes, SchemaConstraintEntryRes, SchemaIndexEntryRes,
+    SchemaNamedElementRes, SchemaProcedureEntryRes, SchemaReducerEntryRes, SchemaTableEntryRes, StdbSchemaRes,
 };
 use super::topo::{topological_groups, TypeGroup};
 use crate::util::{
@@ -71,17 +70,18 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
                             (name, alg)
                         })
                         .collect();
-                    let elements: Vec<SchemaProductElementRes> = elem_data
+                    let elements: Vec<SchemaNamedElementRes> = elem_data
                         .iter()
-                        .map(|(name, alg)| SchemaProductElementRes {
-                            field_name: name,
+                        .map(|(name, alg)| SchemaNamedElementRes {
+                            entry_name: name,
                             alg_type_expr: alg,
                         })
                         .collect();
                     buf.push_str(
-                        &SchemaProductBindingRes {
+                        &SchemaCompoundBindingRes {
                             binding_name: &binding_name,
-                            elements,
+                            is_sum: false,
+                            items: elements,
                         }
                         .to_string(),
                     );
@@ -96,17 +96,18 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
                             (name, alg)
                         })
                         .collect();
-                    let variants: Vec<SchemaVariantElementRes> = variant_data
+                    let variants: Vec<SchemaNamedElementRes> = variant_data
                         .iter()
-                        .map(|(name, alg)| SchemaVariantElementRes {
-                            variant_name: name,
+                        .map(|(name, alg)| SchemaNamedElementRes {
+                            entry_name: name,
                             alg_type_expr: alg,
                         })
                         .collect();
                     buf.push_str(
-                        &SchemaSumBindingRes {
+                        &SchemaCompoundBindingRes {
                             binding_name: &binding_name,
-                            variants,
+                            is_sum: true,
+                            items: variants,
                         }
                         .to_string(),
                     );
@@ -122,17 +123,18 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
                             (name, alg)
                         })
                         .collect();
-                    let variants: Vec<SchemaVariantElementRes> = variant_data
+                    let variants: Vec<SchemaNamedElementRes> = variant_data
                         .iter()
-                        .map(|(name, alg)| SchemaVariantElementRes {
-                            variant_name: name,
+                        .map(|(name, alg)| SchemaNamedElementRes {
+                            entry_name: name,
                             alg_type_expr: alg,
                         })
                         .collect();
                     buf.push_str(
-                        &SchemaSumBindingRes {
+                        &SchemaCompoundBindingRes {
                             binding_name: &binding_name,
-                            variants,
+                            is_sum: true,
+                            items: variants,
                         }
                         .to_string(),
                     );
@@ -195,8 +197,8 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
             param_elements: d
                 .param_elem_data
                 .iter()
-                .map(|(name, alg)| SchemaProductElementRes {
-                    field_name: name,
+                .map(|(name, alg)| SchemaNamedElementRes {
+                    entry_name: name,
                     alg_type_expr: alg,
                 })
                 .collect(),
@@ -234,8 +236,8 @@ pub(super) fn generate_schema_file(module: &ModuleDef, options: &CodegenOptions,
             param_elements: d
                 .param_elem_data
                 .iter()
-                .map(|(name, alg)| SchemaProductElementRes {
-                    field_name: name,
+                .map(|(name, alg)| SchemaNamedElementRes {
+                    entry_name: name,
                     alg_type_expr: alg,
                 })
                 .collect(),
@@ -292,8 +294,8 @@ impl TableEntryData {
             row_elements: self
                 .row_elem_data
                 .iter()
-                .map(|(name, alg)| SchemaProductElementRes {
-                    field_name: name,
+                .map(|(name, alg)| SchemaNamedElementRes {
+                    entry_name: name,
                     alg_type_expr: alg,
                 })
                 .collect(),

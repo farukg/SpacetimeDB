@@ -12,9 +12,7 @@ use super::helpers::{
     render_equal_expr, render_plain_enum, render_record_type_kw, render_res_type, render_sum_type, render_to_key_expr,
     rescript_field_name, rescript_module_name, rescript_type_name, TypeRefStyle,
 };
-use super::templates::{
-    AutoGenHeaderRes, ModuleTypeAliasRes, ModuleWrapperRes, NewtypeHelpersRes, TypesPostambleRes, TypesPreambleRes,
-};
+use super::templates::{AutoGenHeaderRes, ModuleTypeAliasRes, ModuleWrapperRes, NewtypeHelpersRes, TypesPreambleRes};
 use super::topo::{topological_groups, TypeGroup};
 use crate::util::{iter_types, type_ref_name};
 use crate::OutputFile;
@@ -59,7 +57,6 @@ pub fn generate_types_file(
     // Collect type refs for topological sort.
     let types: Vec<_> = iter_types(module).collect();
     if types.is_empty() {
-        write!(code, "{}", TypesPostambleRes).unwrap();
         return OutputFile {
             filename: format!("{root_module}__Types.res"),
             code,
@@ -81,10 +78,6 @@ pub fn generate_types_file(
             }
         }
     }
-
-    // Postamble.
-    write!(code, "{}", TypesPostambleRes).unwrap();
-
     OutputFile {
         filename: format!("{root_module}__Types.res"),
         code,

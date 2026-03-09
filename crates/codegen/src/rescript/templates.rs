@@ -16,7 +16,7 @@
 use boilerplate::Boilerplate;
 
 pub(super) use sigma_rescript_codegen::templates::{
-    AutoGenHeaderRes, ModuleAliasRes, ModuleTypeAliasRes, ModuleWrapperRes, NewtypeHelpersRes,
+    AutoGenHeaderRes, EffectCallMakeFunctorRes, ModuleAliasRes, ModuleTypeAliasRes, ModuleWrapperRes, NewtypeHelpersRes,
 };
 
 // ===========================================================================
@@ -104,20 +104,6 @@ pub(super) struct ServerReducerWrapperRes<'a> {
     pub has_args: bool,
 }
 
-/// Server reducer type record field.
-#[derive(Boilerplate)]
-pub(super) struct ServerReducerTypeFieldRes<'a> {
-    pub name_camel: &'a str,
-    pub module: &'a str,
-    pub has_args: bool,
-}
-
-/// Server reducer value record field.
-#[derive(Boilerplate)]
-pub(super) struct ServerReducerValueFieldRes<'a> {
-    pub name_camel: &'a str,
-}
-
 // ===========================================================================
 // Layer 2: File Composition
 // ===========================================================================
@@ -178,25 +164,14 @@ pub(super) struct TableFileRes<'a> {
     pub sibling_opens: &'a str,
 }
 
-/// Per-reducer file (with args): `Stdb*Reducer.res`.
+/// Per-reducer file: `Stdb*Reducer.res`.
 #[derive(Boilerplate)]
-pub(super) struct ReducerWithArgsFileRes<'a> {
+pub(super) struct ReducerFileRes<'a> {
     pub header: AutoGenHeaderRes,
+    pub has_args: bool,
     /// Pre-rendered args record type block.
+    /// Empty when `has_args` is false.
     pub args_record: &'a str,
-    pub accessor: &'a str,
-    /// Pre-rendered React hooks section, or empty string when async_style = Observer.
-    pub react_hooks: &'a str,
-    /// Pre-rendered Make functor section, or empty string when async_style = Promise.
-    pub make_functor: &'a str,
-    /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
-    pub sibling_opens: &'a str,
-}
-
-/// Per-reducer file (no args): `Stdb*Reducer.res`.
-#[derive(Boilerplate)]
-pub(super) struct ReducerNoArgsFileRes<'a> {
-    pub header: AutoGenHeaderRes,
     pub accessor: &'a str,
     /// Pre-rendered React hooks section, or empty string when async_style = Observer.
     pub react_hooks: &'a str,
@@ -242,31 +217,21 @@ pub(super) struct ProcedureFileRes<'a> {
     pub sibling_opens: &'a str,
 }
 
-/// Make functor section for procedure files (with or without args).
-/// Emitted when async_style ∈ {Observer, All}.
-/// Contains: module Make = (E: Async.EFFECT_RUNTIME) => { let call ... }
-#[derive(Boilerplate)]
-pub(super) struct ProcedureMakeFunctorRes {
-    pub has_args: bool,
-}
-
 /// `StdbTypes.res` preamble — opaque SDK types (emitted before per-type modules).
 #[derive(Boilerplate)]
 pub(super) struct TypesPreambleRes<'a> {
     pub sdk_module: &'a str,
 }
 
-/// `StdbTypes.res` postamble — connectionBuilder type (emitted after per-type modules).
-#[derive(Boilerplate)]
-pub(super) struct TypesPostambleRes;
-
 /// `StdbServerReducers.res` — server-side reducer wrappers with connection management.
 #[derive(Boilerplate)]
 pub(super) struct StdbServerReducersRes<'a> {
     pub header: AutoGenHeaderRes,
     pub reducer_wrappers: Vec<ServerReducerWrapperRes<'a>>,
-    pub reducer_type_fields: Vec<ServerReducerTypeFieldRes<'a>>,
-    pub reducer_value_fields: Vec<ServerReducerValueFieldRes<'a>>,
+    /// Pre-rendered type record fields.
+    pub reducer_type_fields: &'a str,
+    /// Pre-rendered record value fields.
+    pub reducer_value_fields: &'a str,
     pub has_reducers: bool,
     /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
     pub sibling_opens: &'a str,
@@ -372,19 +337,11 @@ pub(super) struct StdbDisplayRes<'a> {
 // Schema Layer 0: Atomic pieces for StdbSchema.res
 // ===========================================================================
 
-/// A single product element in a schema type builder.
-/// Renders: `{name: Some("fieldName"), algebraicType: algTypeExpr},`
+/// A single named schema entry in a product/sum type builder.
+/// Renders: `{name: Some("FieldOrVariant"), algebraicType: algTypeExpr},`
 #[derive(Boilerplate)]
-pub(super) struct SchemaProductElementRes<'a> {
-    pub field_name: &'a str,
-    pub alg_type_expr: &'a str,
-}
-
-/// A single sum variant in a schema type builder.
-/// Renders: `{name: Some("VariantName"), algebraicType: algTypeExpr},`
-#[derive(Boilerplate)]
-pub(super) struct SchemaVariantElementRes<'a> {
-    pub variant_name: &'a str,
+pub(super) struct SchemaNamedElementRes<'a> {
+    pub entry_name: &'a str,
     pub alg_type_expr: &'a str,
 }
 
@@ -419,20 +376,12 @@ pub(super) struct SchemaConstraintEntryRes<'a> {
 // Schema Layer 1: Structural sections for StdbSchema.res
 // ===========================================================================
 
-/// A named type binding — product type.
-/// Renders: `let typeName_ = Compound(Product({value: {elements: [...]}}))`
+/// A named type binding — product or sum.
 #[derive(Boilerplate)]
-pub(super) struct SchemaProductBindingRes<'a> {
+pub(super) struct SchemaCompoundBindingRes<'a> {
     pub binding_name: &'a str,
-    pub elements: Vec<SchemaProductElementRes<'a>>,
-}
-
-/// A named type binding — sum type (tagged union).
-/// Renders: `let typeName_ = Compound(Sum({value: {variants: [...]}}))`
-#[derive(Boilerplate)]
-pub(super) struct SchemaSumBindingRes<'a> {
-    pub binding_name: &'a str,
-    pub variants: Vec<SchemaVariantElementRes<'a>>,
+    pub is_sum: bool,
+    pub items: Vec<SchemaNamedElementRes<'a>>,
 }
 
 /// A single table definition entry in the remoteModule.
@@ -441,7 +390,7 @@ pub(super) struct SchemaSumBindingRes<'a> {
 pub(super) struct SchemaTableEntryRes<'a> {
     pub accessor_name: &'a str,
     pub source_name: &'a str,
-    pub row_elements: Vec<SchemaProductElementRes<'a>>,
+    pub row_elements: Vec<SchemaNamedElementRes<'a>>,
     pub columns: Vec<SchemaColumnEntryRes<'a>>,
     pub indexes: Vec<SchemaIndexEntryRes<'a>>,
     pub constraints: Vec<SchemaConstraintEntryRes<'a>>,
@@ -454,7 +403,7 @@ pub(super) struct SchemaTableEntryRes<'a> {
 pub(super) struct SchemaReducerEntryRes<'a> {
     pub reducer_name: &'a str,
     pub accessor_name: &'a str,
-    pub param_elements: Vec<SchemaProductElementRes<'a>>,
+    pub param_elements: Vec<SchemaNamedElementRes<'a>>,
 }
 
 /// A single procedure definition entry.
@@ -463,7 +412,7 @@ pub(super) struct SchemaReducerEntryRes<'a> {
 pub(super) struct SchemaProcedureEntryRes<'a> {
     pub procedure_name: &'a str,
     pub accessor_name: &'a str,
-    pub param_elements: Vec<SchemaProductElementRes<'a>>,
+    pub param_elements: Vec<SchemaNamedElementRes<'a>>,
     pub return_type_expr: &'a str,
 }
 
@@ -572,14 +521,6 @@ pub(super) struct TableFunctorFileRes<'a> {
     pub display_section: &'a str,
     /// Pre-rendered `module Alias = Root__Alias` lines.
     pub sibling_opens: &'a str,
-}
-
-/// Make functor section for reducer files (with or without args).
-/// Emitted when async_style ∈ {Observer, All}.
-/// Contains: module Make = (E: Async.EFFECT_RUNTIME) => { let call ... }
-#[derive(Boilerplate)]
-pub(super) struct ReducerMakeFunctorRes {
-    pub has_args: bool,
 }
 
 // ===========================================================================

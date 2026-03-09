@@ -1,10 +1,7 @@
 //! Server-side reducer wrappers codegen — generates `StdbServerReducers.res`.
 
 use super::helpers::{rescript_field_name, sibling_opens};
-use super::templates::{
-    AutoGenHeaderRes, ServerReducerTypeFieldRes, ServerReducerValueFieldRes, ServerReducerWrapperRes,
-    StdbServerReducersRes,
-};
+use super::templates::{AutoGenHeaderRes, ServerReducerWrapperRes, StdbServerReducersRes};
 use crate::util::{is_reducer_invokable, iter_reducers};
 use crate::{CodegenOptions, OutputFile};
 
@@ -45,21 +42,23 @@ pub(super) fn generate_server_reducers_file(
         })
         .collect();
 
-    let reducer_type_fields: Vec<ServerReducerTypeFieldRes> = reducer_data
+    let reducer_type_fields = reducer_data
         .iter()
-        .map(|r| ServerReducerTypeFieldRes {
-            name_camel: &r.name_camel,
-            module: &r.module,
-            has_args: r.has_args,
+        .map(|r| {
+            if r.has_args {
+                format!("    {}: {}.args => promise<unit>,", r.name_camel, r.module)
+            } else {
+                format!("    {}: unit => promise<unit>,", r.name_camel)
+            }
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    let reducer_value_fields: Vec<ServerReducerValueFieldRes> = reducer_data
+    let reducer_value_fields = reducer_data
         .iter()
-        .map(|r| ServerReducerValueFieldRes {
-            name_camel: &r.name_camel,
-        })
-        .collect();
+        .map(|r| format!("    {}: {},", r.name_camel, r.name_camel))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     let opens = sibling_opens(root_module, &["Sdk", "Reducers"]);
     OutputFile {
@@ -67,8 +66,8 @@ pub(super) fn generate_server_reducers_file(
         code: StdbServerReducersRes {
             header: AutoGenHeaderRes,
             reducer_wrappers,
-            reducer_type_fields,
-            reducer_value_fields,
+            reducer_type_fields: &reducer_type_fields,
+            reducer_value_fields: &reducer_value_fields,
             has_reducers,
             sibling_opens: &opens,
         }

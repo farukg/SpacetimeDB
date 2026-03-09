@@ -40,10 +40,9 @@ use helpers::{
     sibling_opens, table_module_name, TypeRefStyle,
 };
 use templates::{
-    AutoGenHeaderRes, PkIndexSectionRes, ProcedureFileRes, ProcedureMakeFunctorRes, ReducerMakeFunctorRes,
-    ReducerNoArgsFileRes, ReducerReactHookSectionRes, ReducerServerFileRes, ReducerWithArgsFileRes, StdbAsyncRes,
-    TableEventSectionRes, TableFileRes, TableFunctorFileRes, TableFunctorRes, TableObserverSectionRes,
-    TableReactHookSectionRes,
+    AutoGenHeaderRes, EffectCallMakeFunctorRes, PkIndexSectionRes, ProcedureFileRes, ReducerFileRes,
+    ReducerReactHookSectionRes, ReducerServerFileRes, StdbAsyncRes, TableEventSectionRes, TableFileRes,
+    TableFunctorFileRes, TableFunctorRes, TableObserverSectionRes, TableReactHookSectionRes,
 };
 
 use convert_case::{Case, Casing};
@@ -258,7 +257,18 @@ impl Lang for ReScript {
 
             let make_functor: &str = match self.async_style {
                 AsyncStyle::Observer | AsyncStyle::All => {
-                    make_functor_no_args_str = ReducerMakeFunctorRes { has_args: false }.to_string();
+                    make_functor_no_args_str = EffectCallMakeFunctorRes {
+                        effect_runtime_module_type: "Async.EFFECT_RUNTIME",
+                        conn_type: "Sdk.connection<Sdk.remoteModule>",
+                        has_args: false,
+                        arg_type: "args",
+                        response_type: "unit",
+                        error_type: "exn",
+                        call_expr_with_args: "conn->Sdk.getReducers->call_(callArgs)",
+                        call_expr_no_args: "conn->Sdk.getReducers->call_",
+                        success_mapper: "_ => Promise.resolve(Ok())",
+                    }
+                    .to_string();
                     &make_functor_no_args_str
                 }
                 AsyncStyle::Promise => "",
@@ -278,8 +288,10 @@ impl Lang for ReScript {
 
             OutputFile {
                 filename: format!("{}.res", reducer_module_name(root_module, &reducer.name)),
-                code: ReducerNoArgsFileRes {
+                code: ReducerFileRes {
                     header: AutoGenHeaderRes,
+                    has_args: false,
+                    args_record: "",
                     accessor: &accessor,
                     react_hooks,
                     make_functor,
@@ -308,7 +320,18 @@ impl Lang for ReScript {
 
             let make_functor: &str = match self.async_style {
                 AsyncStyle::Observer | AsyncStyle::All => {
-                    make_functor_with_args_str = ReducerMakeFunctorRes { has_args: true }.to_string();
+                    make_functor_with_args_str = EffectCallMakeFunctorRes {
+                        effect_runtime_module_type: "Async.EFFECT_RUNTIME",
+                        conn_type: "Sdk.connection<Sdk.remoteModule>",
+                        has_args: true,
+                        arg_type: "args",
+                        response_type: "unit",
+                        error_type: "exn",
+                        call_expr_with_args: "conn->Sdk.getReducers->call_(callArgs)",
+                        call_expr_no_args: "conn->Sdk.getReducers->call_",
+                        success_mapper: "_ => Promise.resolve(Ok())",
+                    }
+                    .to_string();
                     &make_functor_with_args_str
                 }
                 AsyncStyle::Promise => "",
@@ -328,8 +351,9 @@ impl Lang for ReScript {
 
             OutputFile {
                 filename: format!("{}.res", reducer_module_name(root_module, &reducer.name)),
-                code: ReducerWithArgsFileRes {
+                code: ReducerFileRes {
                     header: AutoGenHeaderRes,
+                    has_args: true,
                     args_record: args_record.trim_end(),
                     accessor: &accessor,
                     react_hooks,
@@ -386,7 +410,18 @@ impl Lang for ReScript {
         let make_functor_str;
         let make_functor: &str = match self.async_style {
             AsyncStyle::Observer | AsyncStyle::All => {
-                make_functor_str = ProcedureMakeFunctorRes { has_args }.to_string();
+                make_functor_str = EffectCallMakeFunctorRes {
+                    effect_runtime_module_type: "Async.EFFECT_RUNTIME",
+                    conn_type: "Sdk.connection<Sdk.remoteModule>",
+                    has_args,
+                    arg_type: "params",
+                    response_type: "response",
+                    error_type: "exn",
+                    call_expr_with_args: "call(conn, callArgs)",
+                    call_expr_no_args: "call(conn)",
+                    success_mapper: "v => Promise.resolve(Ok(v))",
+                }
+                .to_string();
                 &make_functor_str
             }
             AsyncStyle::Promise => "",

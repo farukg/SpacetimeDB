@@ -23,15 +23,11 @@ module Make = (C: Config) => {
 %% if self.has_reducers {
 
   type serverReducers = {
-%% for f in &self.reducer_type_fields {
-{{f}}
-%% }
+{{self.reducer_type_fields}}
   }
 
   let serverReducers: serverReducers = {
-%% for f in &self.reducer_value_fields {
-{{f}}
-%% }
+{{self.reducer_value_fields}}
   }
 %% }
 }
