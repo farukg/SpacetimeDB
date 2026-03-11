@@ -70,7 +70,7 @@ module Make = (T: TABLE) => {
   }
 %% if self.has_observer {
 
-  module MakeStream = (O: Async.OBSERVER) => {
+  module MakeStream = (O: Fx.OBSERVER) => {
     let observe = (handle: T.handle): O.stream<event> => {
       let ins = O.fromCallback(emit => {
         let cb = (_ctx: Sdk.eventCtx, row: T.t) => emit(Inserted({row: row}))

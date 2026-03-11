@@ -14,7 +14,7 @@ type connectionState = {
   identity: option<Sdk.identity>,
   token: option<string>,
   connectionId: Sdk.connectionId,
-  connectionError: option<exn>,
+  connectionError: option<{message: string}>,
 }
 
 type tableCallbacks<'row> = {
@@ -44,10 +44,10 @@ external useTableWith: (query<'row>, tableCallbacks<'row>) => array<'row> = "use
 external useTableState: query<'row> => rowsState<'row> = "useTableState"
 
 @module("@spacetimedb/rescript/react")
-external useReducer: reducerDef<'params> => ('params => promise<unit>) = "useReducer"
+external useReducer: reducerDef<'params> => ('params => 'effect) = "useReducer"
 
 @module("@spacetimedb/rescript/react")
-external useMutation: reducerDef<'args> => mutationState<'args, exn> = "useMutation"
+external useMutation: reducerDef<'args> => mutationState<'args, {message: string}> = "useMutation"
 
 @module("@spacetimedb/rescript/react")
 external useSpacetimeDB: unit => connectionState = "useSpacetimeDB"

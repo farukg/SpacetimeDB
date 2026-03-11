@@ -531,7 +531,7 @@ pub async fn run_prepared_generate_configs(
                 let rescript_config =
                     rescript_config::load_config(&search_paths).context("failed to load stdb-codegen.toml")?;
                 rescript_lang = ReScript {
-                    async_style: rescript_config.async_style,
+                    call_mode: rescript_config.call_mode,
                     root_module: rescript_config.root_module,
                     output_dir_strategy: rescript_config.output_dir_strategy,
                     table_style: rescript_config.table_style,

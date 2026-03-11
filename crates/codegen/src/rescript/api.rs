@@ -35,13 +35,15 @@ struct ProcedureFieldData {
     has_args: bool,
     /// Module-qualified params type, e.g. `Stdb__Procedures__Foo.params`.
     params_type: String,
-    /// Module-qualified response type, e.g. `Stdb__Procedures__Foo.response`.
+    /// Module-qualified raw call response type, e.g. `Stdb__Procedures__Foo.response`
+    /// or `Stdb__Procedures__Foo.wireResponse` for result-returning procedures.
     response_type: String,
 }
 
 /// Generates `StdbApi.res`.
 pub(super) fn generate_api_file(module: &ModuleDef, options: &CodegenOptions, root_module: &str) -> OutputFile {
     let sdk_module = format!("{root_module}__Sdk");
+    let fx_module = format!("{root_module}__Fx");
 
     // --- Reducer fields ---
     let reducer_data: Vec<ReducerFieldData> = iter_reducers(module, options.visibility)
@@ -77,7 +79,12 @@ pub(super) fn generate_api_file(module: &ModuleDef, options: &CodegenOptions, ro
             } else {
                 String::new()
             };
-            let response_type = format!("{proc_mod}.response");
+            let response_type = match &procedure.return_type_for_generate {
+                spacetimedb_schema::type_for_generate::AlgebraicTypeUse::Result { .. } => {
+                    format!("{proc_mod}.wireResponse")
+                }
+                _ => format!("{proc_mod}.response"),
+            };
             ProcedureFieldData {
                 accessor: raw_camel,
                 camel,
@@ -114,6 +121,7 @@ pub(super) fn generate_api_file(module: &ModuleDef, options: &CodegenOptions, ro
         filename: format!("{root_module}__Api.res"),
         code: StdbApiRes {
             header: AutoGenHeaderRes,
+            fx_module: &fx_module,
             reducer_fields,
             procedure_fields,
             sdk_module: &sdk_module,

@@ -1,6 +1,5 @@
 ---
 source: crates/codegen/tests/codegen.rs
-assertion_line: 37
 expression: outfiles
 ---
 "Stdb.res" = '''
@@ -33,7 +32,13 @@ module Provider = Stdb__Provider
 
 module Procedures = Stdb__Procedures
 
-module Async = Stdb__Async
+module CallRuntime = Stdb__CallRuntime
+
+module FileBytes = Stdb__FileBytes
+
+module AsyncPromise = Stdb__AsyncPromise
+
+module Fx = Stdb__Fx
 
 module Hooks = Stdb__Hooks
 
@@ -52,72 +57,66 @@ module Bridge = Stdb__Bridge
 // This file is a leaf dependency: reducer/procedure modules never import it.
 // Consumer code uses `Api.reducers` / `Api.procedures` for typed access.
 
+module Fx = Stdb__Fx
+
 type reducers = {
-  @as("add") add: Stdb__Reducers__Add.args => promise<unit>,
+  @as("add") add: Stdb__Reducers__Add.args => Fx.call<unit>,
 
-  @as("addPlayer") addPlayer: Stdb__Reducers__AddPlayer.args => promise<unit>,
+  @as("addPlayer") addPlayer: Stdb__Reducers__AddPlayer.args => Fx.call<unit>,
 
-  @as("addPrivate") addPrivate: Stdb__Reducers__AddPrivate.args => promise<unit>,
+  @as("addPrivate") addPrivate: Stdb__Reducers__AddPrivate.args => Fx.call<unit>,
 
-  @as("assertCallerIdentityIsModuleIdentity") assertCallerIdentityIsModuleIdentity: unit => promise<unit>,
+  @as("assertCallerIdentityIsModuleIdentity") assertCallerIdentityIsModuleIdentity: unit => Fx.call<unit>,
 
-  @as("deletePlayer") deletePlayer: Stdb__Reducers__DeletePlayer.args => promise<unit>,
+  @as("deletePlayer") deletePlayer: Stdb__Reducers__DeletePlayer.args => Fx.call<unit>,
 
-  @as("deletePlayersByName") deletePlayersByName: Stdb__Reducers__DeletePlayersByName.args => promise<unit>,
+  @as("deletePlayersByName") deletePlayersByName: Stdb__Reducers__DeletePlayersByName.args => Fx.call<unit>,
 
-  @as("listOverAge") listOverAge: Stdb__Reducers__ListOverAge.args => promise<unit>,
+  @as("listOverAge") listOverAge: Stdb__Reducers__ListOverAge.args => Fx.call<unit>,
 
-  @as("logModuleIdentity") logModuleIdentity: unit => promise<unit>,
+  @as("logModuleIdentity") logModuleIdentity: unit => Fx.call<unit>,
 
-  @as("queryPrivate") queryPrivate: unit => promise<unit>,
+  @as("queryPrivate") queryPrivate: unit => Fx.call<unit>,
 
-  @as("sayHello") sayHello: unit => promise<unit>,
+  @as("sayHello") sayHello: unit => Fx.call<unit>,
 
-  @as("test") test: Stdb__Reducers__Test.args => promise<unit>,
+  @as("test") test: Stdb__Reducers__Test.args => Fx.call<unit>,
 
-  @as("testBtreeIndexArgs") testBtreeIndexArgs: unit => promise<unit>,
+  @as("testBtreeIndexArgs") testBtreeIndexArgs: unit => Fx.call<unit>,
 
 }
 
 type procedures = {
-  @as("getMySchemaViaHttp") getMySchemaViaHttp: unit => promise<Stdb__Procedures__GetMySchemaViaHttp.response>,
+  @as("getMySchemaViaHttp") getMySchemaViaHttp: unit => Fx.call<Stdb__Procedures__GetMySchemaViaHttp.response>,
 
-  @as("returnValue") returnValue: Stdb__Procedures__ReturnValue.params => promise<Stdb__Procedures__ReturnValue.response>,
+  @as("returnValue") returnValue: Stdb__Procedures__ReturnValue.params => Fx.call<Stdb__Procedures__ReturnValue.response>,
 
-  @as("sleepOneSecond") sleepOneSecond: unit => promise<Stdb__Procedures__SleepOneSecond.response>,
+  @as("sleepOneSecond") sleepOneSecond: unit => Fx.call<Stdb__Procedures__SleepOneSecond.response>,
 
-  @as("withTx") withTx: unit => promise<Stdb__Procedures__WithTx.response>,
+  @as("withTx") withTx: unit => Fx.call<Stdb__Procedures__WithTx.response>,
 
 }
 
-@get external reducers: Stdb__Sdk.connection => reducers = "reducers"
-@get external procedures: Stdb__Sdk.connection => procedures = "procedures"
+@get external reducers: Stdb__Sdk.connection<Stdb__Sdk.remoteModule> => reducers = "reducers"
+@get external procedures: Stdb__Sdk.connection<Stdb__Sdk.remoteModule> => procedures = "procedures"
 '''
-"Stdb__Async.res" = '''
+"Stdb__AsyncPromise.res" = '''
 // GENERATED — DO NOT EDIT
-// Module type contracts for observer/functor mode.
-// Implement these once in your app; all reducer and table functors accept them.
+// Legacy call contracts. Concrete transport execution is caller-provided.
 
-// EFFECT_RUNTIME — for reducer calls.
-// E.effect<'a> is your effect/stream type.
-// fromPromise converts the SDK's promise boundary into your effect type (thunked).
-// toPromise is the inverse — for interop with promise-based APIs.
-// run executes as fire-and-forget without exposing promise.
-module type EFFECT_RUNTIME = {
+type call<'a>
+type error
+type cleanup = unit => unit
+
+module type CALL_RUNTIME = {
   type effect<'a>
-  let fromPromise: (unit => promise<'a>) => effect<'a>
-  let toPromise: effect<'a> => promise<'a>
+  let observe: (call<'a>, ~onValue: 'a => unit, ~onError: error => unit) => cleanup
+  let map: (call<'a>, 'a => 'b) => call<'b>
+  let flatMap: (call<'a>, 'a => call<'b>) => call<'b>
+  let capture: call<'a> => call<result<'a, error>>
+  let describeError: error => string
+  let fromCall: (unit => call<'a>) => effect<'a>
   let run: effect<'a> => unit
-}
-
-// OBSERVER — for table subscriptions.
-// O.stream<'a> is your stream type.
-// fromCallback receives: emit => cleanup. Cleanup is strict (always callable, may be no-op).
-// merge combines N streams of same type.
-module type OBSERVER = {
-  type stream<'a>
-  let fromCallback: (('a => unit) => unit => unit) => stream<'a>
-  let merge: array<stream<'a>> => stream<'a>
 }
 '''
 "Stdb__Bridge.res" = '''
@@ -130,7 +129,8 @@ module type OBSERVER = {
 //
 // Usage:
 //   let rows = Hooks.useRows(Bridge.myReceipts)
-//   let {call} = Hooks.useCallWith(Reducers.SaveReceipt.call)
+//   module CallHooks = Hooks.CallHooks(MyCallRuntime)
+//   let {call} = CallHooks.useCallWith(Reducers.SaveReceipt.call)
 
 module Hooks = Stdb__Hooks
 module Client = Stdb__Client
@@ -154,6 +154,65 @@ let testF: Hooks.tableConfig<Stdb__Tables__TestF.t> =
   Hooks.mkTable(conn => { let d: Client.db = conn->Client.db; d.testF }, Stdb__Tables__TestF.iter)
 
 '''
+"Stdb__CallRuntime.res" = '''
+// GENERATED — DO NOT EDIT
+// Default observer runtime backed by CallSupport.
+
+module Fx = Stdb__Fx
+
+type bridgeCall<'a> = Stdb__CallSupport.call<'a>
+type bridgeIssue = Stdb__CallSupport.issue
+
+external toBridgeCall: Fx.call<'a> => bridgeCall<'a> = "%identity"
+external fromBridgeCall: bridgeCall<'a> => Fx.call<'a> = "%identity"
+external fromBridgeIssue: bridgeIssue => Fx.error = "%identity"
+external toBridgeIssue: Fx.error => bridgeIssue = "%identity"
+
+type effect<'a> = Fx.call<'a>
+
+let observe = (call, ~onValue, ~onError) =>
+  Stdb__CallSupport.observe(
+    toBridgeCall(call),
+    ~onValue,
+    ~onError=issue => onError(issue->fromBridgeIssue),
+  )
+
+let map = (call, project) =>
+  call->toBridgeCall->(inner => Stdb__CallSupport.map(inner, project))->fromBridgeCall
+
+let flatMap = (call, bind) =>
+  call
+  ->toBridgeCall
+  ->(inner =>
+    Stdb__CallSupport.flatMap(inner, value => bind(value)->toBridgeCall)
+  )
+  ->fromBridgeCall
+
+let capture = call =>
+  call
+  ->toBridgeCall
+  ->Stdb__CallSupport.capture
+  ->(inner =>
+    Stdb__CallSupport.map(inner, result =>
+      switch result {
+      | Ok(value) => Ok(value)
+      | Error(issue) => Error(issue->fromBridgeIssue)
+      }
+    )
+  )
+  ->fromBridgeCall
+
+let describeError = error =>
+  error->toBridgeIssue->Stdb__CallSupport.issueText
+
+let pure = value =>
+  Stdb__CallSupport.pure(value)->fromBridgeCall
+
+let fromCall = makeCall =>
+  Stdb__CallSupport.fromThunk(() => makeCall()->toBridgeCall)->fromBridgeCall
+
+let run = call => call->observe(~onValue=_ => (), ~onError=_ => ())->ignore
+'''
 "Stdb__Client.res" = '''
 // THIS FILE IS AUTOMATICALLY GENERATED. EDITS TO THIS FILE
 // WILL NOT BE SAVED. MODIFY THE SOURCE CONFIGURATION INSTEAD.
@@ -170,7 +229,7 @@ type db = {
 }
 
 // DB access from connection
-@get external db: Stdb__Sdk.connection => db = "db"
+@get external db: Stdb__Sdk.connection<Stdb__Sdk.remoteModule> => db = "db"
 '''
 "Stdb__Display.res" = '''
 // THIS FILE IS AUTOMATICALLY GENERATED. EDITS TO THIS FILE
@@ -208,7 +267,7 @@ let testFoobar = (v: Types.TestFoobar.t) => v.field
 
 // ── Enum toString ────────────────────────────────────────────────────
 
-let namespaceTestCToString = (v: Types.NamespaceTestC.t) =>
+let namespaceTestCToString = (v: Types.NamespaceTestC.t): string =>
   switch v {
   | Types.NamespaceTestC.Foo => "Foo"
 
@@ -229,7 +288,7 @@ let namespaceTestCFromString = (v: string): option<Types.NamespaceTestC.t> =>
 
 // ── Sum enum toString ───────────────────────────────────────────────
 
-let foobarToString = (v: Types.Foobar.t) =>
+let foobarToString = (v: Types.Foobar.t): string =>
   switch v {
   | Types.Foobar.Baz(payload) => "Baz(" ++ JSON.stringifyAny(payload)->Option.getOr("<opaque>") ++ ")"
 
@@ -238,7 +297,7 @@ let foobarToString = (v: Types.Foobar.t) =>
   | Types.Foobar.Har(payload) => "Har(" ++ Int.toString(payload) ++ ")"
 
   }
-let namespaceTestFToString = (v: Types.NamespaceTestF.t) =>
+let namespaceTestFToString = (v: Types.NamespaceTestF.t): string =>
   switch v {
   | Types.NamespaceTestF.Foo => "Foo"
 
@@ -249,6 +308,77 @@ let namespaceTestFToString = (v: Types.NamespaceTestF.t) =>
   }
 
 '''
+"Stdb__FileBytes.res" = '''
+// GENERATED — DO NOT EDIT
+// Event-based file-to-bytes helper.
+
+type readIssue =
+  | ReadFailed(string)
+  | ReadAborted
+
+module Uint8Array = {
+  type t
+  @new @scope("globalThis") external fromBuffer: ArrayBuffer.t => t = "Uint8Array"
+}
+
+module FileReader = {
+  type t
+  @new @scope("globalThis")
+  external make: unit => t = "FileReader"
+  @set external setOnload: (t, {..} => unit) => unit = "onload"
+  @set external setOnerror: (t, {..} => unit) => unit = "onerror"
+  @set external setOnabort: (t, {..} => unit) => unit = "onabort"
+  @get @return(nullable) external resultArrayBuffer: t => option<ArrayBuffer.t> = "result"
+  @send external readAsArrayBuffer: (t, 'file) => unit = "readAsArrayBuffer"
+}
+
+@val @scope("Array") external toIntArray: Uint8Array.t => array<int> = "from"
+
+let issueText = issue =>
+  switch issue {
+  | ReadFailed(message) => message
+  | ReadAborted => "File read aborted"
+  }
+
+let read = (~file: 'file, ~onSuccess: array<int> => unit, ~onError: readIssue => unit) => {
+  let reader = FileReader.make()
+
+  reader->FileReader.setOnload(_ => {
+    switch reader->FileReader.resultArrayBuffer {
+    | Some(buffer) => onSuccess(buffer->Uint8Array.fromBuffer->toIntArray)
+    | None => onError(ReadFailed("Unable to read file"))
+    }
+  })
+  reader->FileReader.setOnerror(_ => onError(ReadFailed("Unable to read file")))
+  reader->FileReader.setOnabort(_ => onError(ReadAborted))
+  reader->FileReader.readAsArrayBuffer(file)
+}
+'''
+"Stdb__Fx.res" = '''
+// GENERATED — DO NOT EDIT
+// Observer/call contracts. Concrete transport execution is caller-provided.
+
+type call<'a>
+type error
+type cleanup = unit => unit
+
+module type CALL_RUNTIME = {
+  type effect<'a>
+  let observe: (call<'a>, ~onValue: 'a => unit, ~onError: error => unit) => cleanup
+  let map: (call<'a>, 'a => 'b) => call<'b>
+  let flatMap: (call<'a>, 'a => call<'b>) => call<'b>
+  let capture: call<'a> => call<result<'a, error>>
+  let describeError: error => string
+  let fromCall: (unit => call<'a>) => effect<'a>
+  let run: effect<'a> => unit
+}
+
+module type OBSERVER = {
+  type stream<'a>
+  let fromCallback: (('a => unit) => cleanup) => stream<'a>
+  let merge: array<stream<'a>> => stream<'a>
+}
+'''
 "Stdb__Hooks.res" = '''
 // THIS FILE IS AUTOMATICALLY GENERATED BY SPACETIMEDB. EDITS TO THIS FILE
 // WILL NOT BE SAVED. MODIFY TABLES IN YOUR MODULE SOURCE CODE INSTEAD.
@@ -257,15 +387,19 @@ let namespaceTestFToString = (v: Types.NamespaceTestF.t) =>
 //
 // Provides:
 //   - Connection context + Provider component
-//   - Generic useRows / useCallWith / useCallUnit hooks
+//   - Generic useRows hooks
+//   - Runtime-parameterized CallHooks functor for reducer/procedure calls
 //   - Plain subscription helpers (no React)
 //   - All React bindings go directly to "react", NOT through @spacetimedb/rescript/react.
 //
 // Schema-specific table/reducer configs live in Stdb__Bridge.res.
 
 module Sdk = Stdb__Sdk
+module Normalize = Stdb__Normalize
 module Client = Stdb__Client
 module Schema = Stdb__Schema
+module Fx = Stdb__Fx
+module CallRuntime = Stdb__CallRuntime
 
 // ── Minimal React bindings ────────────────────────────────────────────────────
 // getServerSnapshot is required for SSR — without it React throws
@@ -294,12 +428,14 @@ external useMemo0: (unit => 'a) => 'a = "useMemo"
 // ── Connection Context ────────────────────────────────────────────────────────
 
 type connectionStore = {
-  mutable conn: option<Sdk.connection>,
+  mutable conn: option<Sdk.connection<Sdk.remoteModule>>,
+  mutable subscriptionReady: bool,
   mutable listeners: array<unit => unit>,
 }
 
 let connectionContext: React.Context.t<connectionStore> = React.createContext({
   conn: None,
+  subscriptionReady: false,
   listeners: [],
 })
 
@@ -324,21 +460,39 @@ module Provider = {
   let make = (~uri: string, ~moduleName: string, ~children: React.element) => {
     let store = useMemo0(() => ({
       conn: None,
+      subscriptionReady: false,
       listeners: [],
     }: connectionStore))
 
     useEffectOnMount(() => {
       let savedToken = _getItem(tokenKey)->Nullable.toOption
+      let notify = () => store.listeners->Array.forEach(fn => fn())
       let builder =
-        Sdk.makeDbConnectionBuilder(Schema.remoteModule, config =>
+        Normalize.makeNormalizedBuilder(Schema.remoteModule, config =>
           Sdk.makeDbConnectionImpl(config)
         )
         ->Sdk.withUri(uri)
         ->Sdk.withDatabaseName(moduleName)
         ->Sdk.withToken(savedToken)
-        ->Sdk.onConnect((_conn, identityHex, authToken) => {
+        ->Sdk.onConnect((conn, identity, authToken) => {
           _setItem(tokenKey, authToken)
-          _setItem(identityKey, identityHex)
+          _setItem(identityKey, identity->Sdk.Identity.toHexString)
+          // Connection available immediately (procedures work before subscription)
+          store.conn = Some(conn)
+          notify()
+          // Subscribe to all non-event tables/views
+          let queries = Schema.subscribableTableNames->Array.map(t => `SELECT * FROM ${t}`)
+          conn
+          ->Sdk.subscriptionBuilder
+          ->Sdk.onApplied(_ctx => {
+            store.subscriptionReady = true
+            notify()
+          })
+          ->Sdk.onSubError((_ctx, _error) => {
+            Console.error("SpacetimeDB subscription error")
+          })
+          ->Sdk.subscribe(queries)
+          ->ignore
         })
         ->Sdk.onConnectError((_ctx, _error) => {
           switch savedToken {
@@ -349,14 +503,13 @@ module Provider = {
           }
         })
 
-      let conn = builder->Sdk.buildConnection
-      store.conn = Some(conn)
-      store.listeners->Array.forEach(fn => fn())
+      builder->Sdk.buildConnection->ignore
 
       Some(
         () => {
           store.conn = None
-          store.listeners->Array.forEach(fn => fn())
+          store.subscriptionReady = false
+          notify()
         },
       )
     })
@@ -365,7 +518,7 @@ module Provider = {
   }
 }
 
-let useConnection = (): option<Sdk.connection> => {
+let useConnection = (): option<Sdk.connection<Sdk.remoteModule>> => {
   let store = React.useContext(connectionContext)
   let subscribe = notify => {
     store.listeners = store.listeners->Array.concat([notify])
@@ -377,17 +530,18 @@ let useConnection = (): option<Sdk.connection> => {
   useSyncExternalStore(subscribe, getSnapshot, ~getServerSnapshot=() => None)
 }
 
-type connectionInfo = {isActive: bool}
+type connectionInfo = {isActive: bool, subscriptionReady: bool}
 
 let useConnectionInfo = (): connectionInfo => {
   let conn = useConnection()
-  {isActive: conn->Option.isSome}
+  let store = React.useContext(connectionContext)
+  {isActive: conn->Option.isSome, subscriptionReady: store.subscriptionReady}
 }
 
 // ── Table config + generic useRows ────────────────────────────────────────────
 
 type tableConfig<'row> = {
-  getHandle: Sdk.connection => Obj.t,
+  getHandle: Sdk.connection<Sdk.remoteModule> => Obj.t,
   iter: Obj.t => Iterator.t<'row>,
 }
 
@@ -477,170 +631,164 @@ let useRows = (config: tableConfig<'row>): array<'row> => {
 
 // ── Reducer mutation hooks ────────────────────────────────────────────────────
 
-// Extract a human-readable message from any JS exception/error value.
-let _exnToMessage: exn => string = %raw(`
-  function(e) {
-    if (e && typeof e.message === 'string') return e.message;
-    if (typeof e === 'string') return e;
-    try { return String(e); } catch(_) { return 'Unknown reducer error'; }
-  }
-`)
-
-// Fire-and-forget: schedule microtask to call the promise error handler.
-// This is the ONLY place the SDK's promise<unit> is consumed — entirely inside
-// the infrastructure boundary, invisible to application code.
-let _fireAndForget: (promise<unit>, exn => unit) => unit = %raw(`
-  function(p, onError) { p.then(undefined, onError); }
-`)
-
 type reducerError = {
-  raw: exn,
   message: string,
 }
 
-type mutationState<'args> = {
-  call: 'args => unit,
-  isPending: bool,
-  error: option<reducerError>,
-}
-
-let useCallWith = (
-  callReducer: (Sdk.connection, 'args) => promise<unit>,
-): mutationState<'args> => {
-  let conn = useConnection()
-  let (isPending, setIsPending) = useState(false)
-  let (error, setError) = useState(None)
-
-  let call = args => {
-    switch conn {
-    | Some(c) =>
-      setIsPending(_ => true)
-      setError(_ => None)
-      _fireAndForget(
-        callReducer(c, args),
-        e => {
-          setIsPending(_ => false)
-          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
-        },
-      )
-    | None => Console.warn("Hooks.useCallWith: no connection")
-    }
+module CallHooks = (R: Fx.CALL_RUNTIME) => {
+  type mutationState<'args> = {
+    call: 'args => unit,
+    isPending: bool,
+    error: option<reducerError>,
   }
 
-  {call, isPending, error}
-}
+  let useCallWith = (
+    callReducer: (Sdk.connection<Sdk.remoteModule>, 'args) => Fx.call<unit>,
+  ): mutationState<'args> => {
+    let conn = useConnection()
+    let (isPending, setIsPending) = useState(false)
+    let (error, setError) = useState(None)
 
-type mutationStateUnit = {
-  call: unit => unit,
-  isPending: bool,
-  error: option<reducerError>,
-}
-
-let useCallUnit = (
-  callReducer: Sdk.connection => promise<unit>,
-): mutationStateUnit => {
-  let conn = useConnection()
-  let (isPending, setIsPending) = useState(false)
-  let (error, setError) = useState(None)
-
-  let call = () => {
-    switch conn {
-    | Some(c) =>
-      setIsPending(_ => true)
-      setError(_ => None)
-      _fireAndForget(
-        callReducer(c),
-        e => {
-          setIsPending(_ => false)
-          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
-        },
-      )
-    | None => Console.warn("Hooks.useCallUnit: no connection")
+    let call = args => {
+      switch conn {
+      | Some(c) =>
+        setIsPending(_ => true)
+        setError(_ => None)
+        R.observe(
+          callReducer(c, args),
+          ~onValue=_ => setIsPending(_ => false),
+          ~onError=e => {
+            setIsPending(_ => false)
+            setError(_ => Some({message: R.describeError(e)}))
+          },
+        )->ignore
+      | None => Console.warn("Hooks.CallHooks.useCallWith: no connection")
+      }
     }
+
+    {call, isPending, error}
   }
 
-  {call, isPending, error}
-}
-
-// ── Procedure mutation hooks ──────────────────────────────────────────────────
-
-type procedureState<'args, 'result> = {
-  call: 'args => unit,
-  isPending: bool,
-  error: option<reducerError>,
-  data: option<'result>,
-}
-
-let useCallProcedure = (
-  callProc: (Sdk.connection, 'args) => promise<'result>,
-): procedureState<'args, 'result> => {
-  let conn = useConnection()
-  let (isPending, setIsPending) = useState(false)
-  let (error, setError) = useState(None)
-  let (data, setData) = useState(None)
-
-  let call = args => {
-    switch conn {
-    | Some(c) =>
-      setIsPending(_ => true)
-      setError(_ => None)
-      setData(_ => None)
-      _fireAndForget(
-        callProc(c, args)->Promise.then(result => {
-          setIsPending(_ => false)
-          setData(_ => Some(result))
-          Promise.resolve()
-        }),
-        e => {
-          setIsPending(_ => false)
-          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
-        },
-      )
-    | None => Console.warn("Hooks.useCallProcedure: no connection")
-    }
+  type mutationStateUnit = {
+    call: unit => unit,
+    isPending: bool,
+    error: option<reducerError>,
   }
 
-  {call, isPending, error, data}
-}
+  let useCallUnit = (
+    callReducer: Sdk.connection<Sdk.remoteModule> => Fx.call<unit>,
+  ): mutationStateUnit => {
+    let conn = useConnection()
+    let (isPending, setIsPending) = useState(false)
+    let (error, setError) = useState(None)
 
-type procedureStateUnit<'result> = {
-  call: unit => unit,
-  isPending: bool,
-  error: option<reducerError>,
-  data: option<'result>,
-}
-
-let useCallProcedureUnit = (
-  callProc: Sdk.connection => promise<'result>,
-): procedureStateUnit<'result> => {
-  let conn = useConnection()
-  let (isPending, setIsPending) = useState(false)
-  let (error, setError) = useState(None)
-  let (data, setData) = useState(None)
-
-  let call = () => {
-    switch conn {
-    | Some(c) =>
-      setIsPending(_ => true)
-      setError(_ => None)
-      setData(_ => None)
-      _fireAndForget(
-        callProc(c)->Promise.then(result => {
-          setIsPending(_ => false)
-          setData(_ => Some(result))
-          Promise.resolve()
-        }),
-        e => {
-          setIsPending(_ => false)
-          setError(_ => Some({raw: e, message: _exnToMessage(e)}))
-        },
-      )
-    | None => Console.warn("Hooks.useCallProcedureUnit: no connection")
+    let call = () => {
+      switch conn {
+      | Some(c) =>
+        setIsPending(_ => true)
+        setError(_ => None)
+        R.observe(
+          callReducer(c),
+          ~onValue=_ => setIsPending(_ => false),
+          ~onError=e => {
+            setIsPending(_ => false)
+            setError(_ => Some({message: R.describeError(e)}))
+          },
+        )->ignore
+      | None => Console.warn("Hooks.CallHooks.useCallUnit: no connection")
+      }
     }
+
+    {call, isPending, error}
   }
 
-  {call, isPending, error, data}
+  // ── Procedure mutation hooks ────────────────────────────────────────────────
+
+  type procedureState<'args, 'result> = {
+    call: 'args => unit,
+    isPending: bool,
+    error: option<reducerError>,
+    data: option<'result>,
+  }
+
+  let useCallProcedure = (
+    callProc: (Sdk.connection<Sdk.remoteModule>, 'args) => Fx.call<'result>,
+  ): procedureState<'args, 'result> => {
+    let conn = useConnection()
+    let (isPending, setIsPending) = useState(false)
+    let (error, setError) = useState(None)
+    let (data, setData) = useState(None)
+
+    let call = args => {
+      switch conn {
+      | Some(c) =>
+        setIsPending(_ => true)
+        setError(_ => None)
+        setData(_ => None)
+        R.observe(
+          callProc(c, args),
+          ~onValue=result => {
+            setIsPending(_ => false)
+            setData(_ => Some(result))
+          },
+          ~onError=e => {
+            setIsPending(_ => false)
+            setError(_ => Some({message: R.describeError(e)}))
+          },
+        )->ignore
+      | None => Console.warn("Hooks.CallHooks.useCallProcedure: no connection")
+      }
+    }
+
+    {call, isPending, error, data}
+  }
+
+  type procedureStateUnit<'result> = {
+    call: unit => unit,
+    isPending: bool,
+    error: option<reducerError>,
+    data: option<'result>,
+  }
+
+  let useCallProcedureUnit = (
+    callProc: Sdk.connection<Sdk.remoteModule> => Fx.call<'result>,
+  ): procedureStateUnit<'result> => {
+    let conn = useConnection()
+    let (isPending, setIsPending) = useState(false)
+    let (error, setError) = useState(None)
+    let (data, setData) = useState(None)
+
+    let call = () => {
+      switch conn {
+      | Some(c) =>
+        setIsPending(_ => true)
+        setError(_ => None)
+        setData(_ => None)
+        R.observe(
+          callProc(c),
+          ~onValue=result => {
+            setIsPending(_ => false)
+            setData(_ => Some(result))
+          },
+          ~onError=e => {
+            setIsPending(_ => false)
+            setError(_ => Some({message: R.describeError(e)}))
+          },
+        )->ignore
+      | None => Console.warn("Hooks.CallHooks.useCallProcedureUnit: no connection")
+      }
+    }
+
+    {call, isPending, error, data}
+  }
 }
+
+module DefaultCallHooks = CallHooks(CallRuntime)
+
+let useCallWith = DefaultCallHooks.useCallWith
+let useCallUnit = DefaultCallHooks.useCallUnit
+let useCallProcedure = DefaultCallHooks.useCallProcedure
+let useCallProcedureUnit = DefaultCallHooks.useCallProcedureUnit
 
 // ── Table config constructor ──────────────────────────────────────────────────
 
@@ -648,7 +796,7 @@ external toObj: 'a => Obj.t = "%identity"
 external fromObj: Obj.t => 'a = "%identity"
 
 let mkTable = (
-  getHandle: Sdk.connection => 'handle,
+  getHandle: Sdk.connection<Sdk.remoteModule> => 'handle,
   iter: 'handle => Iterator.t<'row>,
 ): tableConfig<'row> => {
   getHandle: conn => toObj(getHandle(conn)),
@@ -663,8 +811,18 @@ module Subscriptions = {
     ~onUpdate: (Sdk.eventCtx, 'row, 'row) => unit,
     ~onDelete: (Sdk.eventCtx, 'row) => unit,
   ): (unit => unit) => {
-    ignore((handle, onInsert, onUpdate, onDelete))
-    () => ()
+    let h = toObj(handle)->asHandleLike
+    let insertCb = (ctx, row) => onInsert(fromObj(ctx), fromObj(row))
+    let updateCb = (ctx, prev, next) => onUpdate(fromObj(ctx), fromObj(prev), fromObj(next))
+    let deleteCb = (ctx, row) => onDelete(fromObj(ctx), fromObj(row))
+    h->_onInsert(insertCb)
+    h->_onUpdate(updateCb)
+    h->_onDelete(deleteCb)
+    () => {
+      h->_removeOnInsert(insertCb)
+      h->_removeOnUpdate(updateCb)
+      h->_removeOnDelete(deleteCb)
+    }
   }
 }
 '''
@@ -718,25 +876,21 @@ module WithTx = Stdb__Procedures__WithTx
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 
 type params = unit
 type response = string
 
 let procedureName = "get_my_schema_via_http"
 
-@send external call_: Sdk.procedures => promise<response> = "getMySchemaViaHttp"
-let call = (conn: Sdk.connection): promise<response> =>
+@send external call_: Sdk.procedures => Fx.call<response> = "getMySchemaViaHttp"
+let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<response> =>
   conn->Sdk.getProcedures->call_
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection): E.effect<result<response, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getProcedures->call_
-      ->Promise.then(v => Promise.resolve(Ok(v)))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): E.effect<result<response, Fx.error>> =>
+    E.fromCall(() => call(conn)->E.capture)
 }
 
 '''
@@ -746,7 +900,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 
 type params = {
   @as("foo") foo: bigint,
@@ -756,18 +910,14 @@ type response = Types.Baz.t
 
 let procedureName = "return_value"
 
-@send external call_: (Sdk.procedures, params) => promise<response> = "returnValue"
-let call = (conn: Sdk.connection, args: params): promise<response> =>
+@send external call_: (Sdk.procedures, params) => Fx.call<response> = "returnValue"
+let call = (conn: Sdk.connection<Sdk.remoteModule>, args: params): Fx.call<response> =>
   conn->Sdk.getProcedures->call_(args)
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection, callArgs: params): E.effect<result<response, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getProcedures->call_(callArgs)
-      ->Promise.then(v => Promise.resolve(Ok(v)))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, callArgs: params): E.effect<result<response, Fx.error>> =>
+    E.fromCall(() => call(conn, callArgs)->E.capture)
 }
 
 '''
@@ -777,25 +927,21 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 
 type params = unit
 type response = unit
 
 let procedureName = "sleep_one_second"
 
-@send external call_: Sdk.procedures => promise<response> = "sleepOneSecond"
-let call = (conn: Sdk.connection): promise<response> =>
+@send external call_: Sdk.procedures => Fx.call<response> = "sleepOneSecond"
+let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<response> =>
   conn->Sdk.getProcedures->call_
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection): E.effect<result<response, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getProcedures->call_
-      ->Promise.then(v => Promise.resolve(Ok(v)))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): E.effect<result<response, Fx.error>> =>
+    E.fromCall(() => call(conn)->E.capture)
 }
 
 '''
@@ -805,25 +951,21 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 
 type params = unit
 type response = unit
 
 let procedureName = "with_tx"
 
-@send external call_: Sdk.procedures => promise<response> = "withTx"
-let call = (conn: Sdk.connection): promise<response> =>
+@send external call_: Sdk.procedures => Fx.call<response> = "withTx"
+let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<response> =>
   conn->Sdk.getProcedures->call_
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection): E.effect<result<response, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getProcedures->call_
-      ->Promise.then(v => Promise.resolve(Ok(v)))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): E.effect<result<response, Fx.error>> =>
+    E.fromCall(() => call(conn)->E.capture)
 }
 
 '''
@@ -832,7 +974,7 @@ module Make = (E: Async.EFFECT_RUNTIME) => {
 // WILL NOT BE SAVED. MODIFY TABLES IN YOUR MODULE SOURCE CODE INSTEAD.
 
 @module("@spacetimedb/rescript/react") @react.component
-external make: (~connectionBuilder: Stdb__Sdk.connectionBuilder, ~children: React.element) => React.element = "SpacetimeDBProvider"
+external make: (~connectionBuilder: Stdb__Sdk.connectionBuilder<Stdb__Sdk.connection<Stdb__Sdk.remoteModule>>, ~children: React.element) => React.element = "SpacetimeDBProvider"
 '''
 "Stdb__React.res" = '''
 // THIS FILE IS AUTOMATICALLY GENERATED BY SPACETIMEDB. EDITS TO THIS FILE
@@ -924,7 +1066,7 @@ module TestBtreeIndexArgs = Stdb__Reducers__TestBtreeIndexArgs
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type args = {
@@ -934,18 +1076,14 @@ type args = {
 
 }
 
-@send external call_: (Sdk.reducers, args) => promise<unit> = "add"
-let call = (conn: Sdk.connection, args: args): promise<unit> =>
+@send external call_: (Sdk.reducers, args) => Fx.call<unit> = "add"
+let call = (conn: Sdk.connection<Sdk.remoteModule>, args: args): Fx.call<unit> =>
   conn->Sdk.getReducers->call_(args)
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection, callArgs: args): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_(callArgs)
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, callArgs: args): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_(callArgs)->E.capture)
 }
 
 
@@ -963,7 +1101,7 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type args = {
@@ -971,18 +1109,14 @@ type args = {
 
 }
 
-@send external call_: (Sdk.reducers, args) => promise<unit> = "addPlayer"
-let call = (conn: Sdk.connection, args: args): promise<unit> =>
+@send external call_: (Sdk.reducers, args) => Fx.call<unit> = "addPlayer"
+let call = (conn: Sdk.connection<Sdk.remoteModule>, args: args): Fx.call<unit> =>
   conn->Sdk.getReducers->call_(args)
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection, callArgs: args): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_(callArgs)
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, callArgs: args): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_(callArgs)->E.capture)
 }
 
 
@@ -1000,15 +1134,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.AddPlayer
 
-let call = async (conn: Sdk.connection, args: Reducer.args) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_(args)
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, args: Reducer.args): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_(args)->R.capture
 }
 '''
 "Stdb__Reducers__AddPrivate.res" = '''
@@ -1017,7 +1148,7 @@ let call = async (conn: Sdk.connection, args: Reducer.args) => {
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type args = {
@@ -1025,18 +1156,14 @@ type args = {
 
 }
 
-@send external call_: (Sdk.reducers, args) => promise<unit> = "addPrivate"
-let call = (conn: Sdk.connection, args: args): promise<unit> =>
+@send external call_: (Sdk.reducers, args) => Fx.call<unit> = "addPrivate"
+let call = (conn: Sdk.connection<Sdk.remoteModule>, args: args): Fx.call<unit> =>
   conn->Sdk.getReducers->call_(args)
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection, callArgs: args): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_(callArgs)
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, callArgs: args): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_(callArgs)->E.capture)
 }
 
 
@@ -1054,15 +1181,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.AddPrivate
 
-let call = async (conn: Sdk.connection, args: Reducer.args) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_(args)
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, args: Reducer.args): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_(args)->R.capture
 }
 '''
 "Stdb__Reducers__Add__Server.res" = '''
@@ -1071,15 +1195,12 @@ let call = async (conn: Sdk.connection, args: Reducer.args) => {
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.Add
 
-let call = async (conn: Sdk.connection, args: Reducer.args) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_(args)
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, args: Reducer.args): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_(args)->R.capture
 }
 '''
 "Stdb__Reducers__AssertCallerIdentityIsModuleIdentity.res" = '''
@@ -1087,21 +1208,17 @@ let call = async (conn: Sdk.connection, args: Reducer.args) => {
 // WILL NOT BE SAVED. MODIFY THE SOURCE CONFIGURATION INSTEAD.
 
 module Sdk = Stdb__Sdk
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
-@send external call_: Sdk.reducers => promise<unit> = "assertCallerIdentityIsModuleIdentity"
-let call = (conn: Sdk.connection): promise<unit> =>
+@send external call_: Sdk.reducers => Fx.call<unit> = "assertCallerIdentityIsModuleIdentity"
+let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<unit> =>
   conn->Sdk.getReducers->call_
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_->E.capture)
 }
 
 
@@ -1119,15 +1236,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.AssertCallerIdentityIsModuleIdentity
 
-let call = async (conn: Sdk.connection) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_->R.capture
 }
 '''
 "Stdb__Reducers__DeletePlayer.res" = '''
@@ -1136,7 +1250,7 @@ let call = async (conn: Sdk.connection) => {
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type args = {
@@ -1144,18 +1258,14 @@ type args = {
 
 }
 
-@send external call_: (Sdk.reducers, args) => promise<unit> = "deletePlayer"
-let call = (conn: Sdk.connection, args: args): promise<unit> =>
+@send external call_: (Sdk.reducers, args) => Fx.call<unit> = "deletePlayer"
+let call = (conn: Sdk.connection<Sdk.remoteModule>, args: args): Fx.call<unit> =>
   conn->Sdk.getReducers->call_(args)
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection, callArgs: args): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_(callArgs)
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, callArgs: args): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_(callArgs)->E.capture)
 }
 
 
@@ -1173,15 +1283,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.DeletePlayer
 
-let call = async (conn: Sdk.connection, args: Reducer.args) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_(args)
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, args: Reducer.args): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_(args)->R.capture
 }
 '''
 "Stdb__Reducers__DeletePlayersByName.res" = '''
@@ -1190,7 +1297,7 @@ let call = async (conn: Sdk.connection, args: Reducer.args) => {
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type args = {
@@ -1198,18 +1305,14 @@ type args = {
 
 }
 
-@send external call_: (Sdk.reducers, args) => promise<unit> = "deletePlayersByName"
-let call = (conn: Sdk.connection, args: args): promise<unit> =>
+@send external call_: (Sdk.reducers, args) => Fx.call<unit> = "deletePlayersByName"
+let call = (conn: Sdk.connection<Sdk.remoteModule>, args: args): Fx.call<unit> =>
   conn->Sdk.getReducers->call_(args)
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection, callArgs: args): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_(callArgs)
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, callArgs: args): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_(callArgs)->E.capture)
 }
 
 
@@ -1227,15 +1330,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.DeletePlayersByName
 
-let call = async (conn: Sdk.connection, args: Reducer.args) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_(args)
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, args: Reducer.args): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_(args)->R.capture
 }
 '''
 "Stdb__Reducers__ListOverAge.res" = '''
@@ -1244,7 +1344,7 @@ let call = async (conn: Sdk.connection, args: Reducer.args) => {
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type args = {
@@ -1252,18 +1352,14 @@ type args = {
 
 }
 
-@send external call_: (Sdk.reducers, args) => promise<unit> = "listOverAge"
-let call = (conn: Sdk.connection, args: args): promise<unit> =>
+@send external call_: (Sdk.reducers, args) => Fx.call<unit> = "listOverAge"
+let call = (conn: Sdk.connection<Sdk.remoteModule>, args: args): Fx.call<unit> =>
   conn->Sdk.getReducers->call_(args)
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection, callArgs: args): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_(callArgs)
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, callArgs: args): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_(callArgs)->E.capture)
 }
 
 
@@ -1281,15 +1377,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.ListOverAge
 
-let call = async (conn: Sdk.connection, args: Reducer.args) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_(args)
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, args: Reducer.args): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_(args)->R.capture
 }
 '''
 "Stdb__Reducers__LogModuleIdentity.res" = '''
@@ -1297,21 +1390,17 @@ let call = async (conn: Sdk.connection, args: Reducer.args) => {
 // WILL NOT BE SAVED. MODIFY THE SOURCE CONFIGURATION INSTEAD.
 
 module Sdk = Stdb__Sdk
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
-@send external call_: Sdk.reducers => promise<unit> = "logModuleIdentity"
-let call = (conn: Sdk.connection): promise<unit> =>
+@send external call_: Sdk.reducers => Fx.call<unit> = "logModuleIdentity"
+let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<unit> =>
   conn->Sdk.getReducers->call_
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_->E.capture)
 }
 
 
@@ -1329,15 +1418,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.LogModuleIdentity
 
-let call = async (conn: Sdk.connection) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_->R.capture
 }
 '''
 "Stdb__Reducers__QueryPrivate.res" = '''
@@ -1345,21 +1431,17 @@ let call = async (conn: Sdk.connection) => {
 // WILL NOT BE SAVED. MODIFY THE SOURCE CONFIGURATION INSTEAD.
 
 module Sdk = Stdb__Sdk
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
-@send external call_: Sdk.reducers => promise<unit> = "queryPrivate"
-let call = (conn: Sdk.connection): promise<unit> =>
+@send external call_: Sdk.reducers => Fx.call<unit> = "queryPrivate"
+let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<unit> =>
   conn->Sdk.getReducers->call_
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_->E.capture)
 }
 
 
@@ -1377,15 +1459,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.QueryPrivate
 
-let call = async (conn: Sdk.connection) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_->R.capture
 }
 '''
 "Stdb__Reducers__SayHello.res" = '''
@@ -1393,21 +1472,17 @@ let call = async (conn: Sdk.connection) => {
 // WILL NOT BE SAVED. MODIFY THE SOURCE CONFIGURATION INSTEAD.
 
 module Sdk = Stdb__Sdk
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
-@send external call_: Sdk.reducers => promise<unit> = "sayHello"
-let call = (conn: Sdk.connection): promise<unit> =>
+@send external call_: Sdk.reducers => Fx.call<unit> = "sayHello"
+let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<unit> =>
   conn->Sdk.getReducers->call_
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_->E.capture)
 }
 
 
@@ -1425,15 +1500,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.SayHello
 
-let call = async (conn: Sdk.connection) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_->R.capture
 }
 '''
 "Stdb__Reducers__Test.res" = '''
@@ -1442,7 +1514,7 @@ let call = async (conn: Sdk.connection) => {
 
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type args = {
@@ -1456,18 +1528,14 @@ type args = {
 
 }
 
-@send external call_: (Sdk.reducers, args) => promise<unit> = "test"
-let call = (conn: Sdk.connection, args: args): promise<unit> =>
+@send external call_: (Sdk.reducers, args) => Fx.call<unit> = "test"
+let call = (conn: Sdk.connection<Sdk.remoteModule>, args: args): Fx.call<unit> =>
   conn->Sdk.getReducers->call_(args)
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection, callArgs: args): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_(callArgs)
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, callArgs: args): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_(callArgs)->E.capture)
 }
 
 
@@ -1484,21 +1552,17 @@ let useCallFn = () => React.useReducer(reducerDef)
 // WILL NOT BE SAVED. MODIFY THE SOURCE CONFIGURATION INSTEAD.
 
 module Sdk = Stdb__Sdk
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
-@send external call_: Sdk.reducers => promise<unit> = "testBtreeIndexArgs"
-let call = (conn: Sdk.connection): promise<unit> =>
+@send external call_: Sdk.reducers => Fx.call<unit> = "testBtreeIndexArgs"
+let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<unit> =>
   conn->Sdk.getReducers->call_
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module Make = (E: Async.EFFECT_RUNTIME) => {
-  let call = (conn: Sdk.connection): E.effect<result<unit, exn>> =>
-    E.fromPromise(() =>
-      conn->Sdk.getReducers->call_
-      ->Promise.then(_ => Promise.resolve(Ok()))
-      ->Promise.catch(e => Promise.resolve(Error(e)))
-    )
+module Make = (E: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): E.effect<result<unit, Fx.error>> =>
+    E.fromCall(() => conn->Sdk.getReducers->call_->E.capture)
 }
 
 
@@ -1516,15 +1580,12 @@ let useCallFn = () => React.useReducer(reducerDef)
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.TestBtreeIndexArgs
 
-let call = async (conn: Sdk.connection) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_->R.capture
 }
 '''
 "Stdb__Reducers__Test__Server.res" = '''
@@ -1533,15 +1594,12 @@ let call = async (conn: Sdk.connection) => {
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 module Reducer = Reducers.Test
 
-let call = async (conn: Sdk.connection, args: Reducer.args) => {
-  try {
-    await conn->Sdk.getReducers->Reducer.call_(args)
-    Ok()
-  } catch {
-  | exn => Error(exn)
-  }
+module Make = (R: Fx.CALL_RUNTIME) => {
+  let call = (conn: Sdk.connection<Sdk.remoteModule>, args: Reducer.args): Fx.call<result<unit, Fx.error>> =>
+    conn->Sdk.getReducers->Reducer.call_(args)->R.capture
 }
 '''
 "Stdb__Schema.res" = '''
@@ -1557,108 +1615,142 @@ open Stdb__Sdk
 
 // ─── Named type algebraicType bindings ──────────────────────────────
 
-let baz_ = Compound(Product({value: {elements: [
+let baz_ = Compound(
+  Product({value: {elements: [
     {name: Some("field"), algebraicType: String},
 
-]}}))
-let foobar_ = Compound(Sum({value: {variants: [
+]}})
+)
+let foobar_ = Compound(
+  Sum({value: {variants: [
     {name: Some("Baz"), algebraicType: baz_},
 
     {name: Some("Bar"), algebraicType: Compound(Product({value: {elements: []}}))},
 
     {name: Some("Har"), algebraicType: U32},
 
-]}}))
-let hasSpecialStuff_ = Compound(Product({value: {elements: [
+]}})
+)
+let hasSpecialStuff_ = Compound(
+  Product({value: {elements: [
     {name: Some("identity"), algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
 
     {name: Some("connection_id"), algebraicType: Compound(Product({value: {elements: [{name: Some("__connection_id__"), algebraicType: U128}]}}))},
 
-]}}))
-let person_ = Compound(Product({value: {elements: [
+]}})
+)
+let person_ = Compound(
+  Product({value: {elements: [
     {name: Some("id"), algebraicType: U32},
 
     {name: Some("name"), algebraicType: String},
 
     {name: Some("age"), algebraicType: U8},
 
-]}}))
-let pkMultiIdentity_ = Compound(Product({value: {elements: [
+]}})
+)
+let pkMultiIdentity_ = Compound(
+  Product({value: {elements: [
     {name: Some("id"), algebraicType: U32},
 
     {name: Some("other"), algebraicType: U32},
 
-]}}))
-let player_ = Compound(Product({value: {elements: [
+]}})
+)
+let player_ = Compound(
+  Product({value: {elements: [
     {name: Some("identity"), algebraicType: Compound(Product({value: {elements: [{name: Some("__identity__"), algebraicType: U256}]}}))},
 
     {name: Some("player_id"), algebraicType: U64},
 
     {name: Some("name"), algebraicType: String},
 
-]}}))
-let point_ = Compound(Product({value: {elements: [
+]}})
+)
+let point_ = Compound(
+  Product({value: {elements: [
     {name: Some("x"), algebraicType: I64},
 
     {name: Some("y"), algebraicType: I64},
 
-]}}))
-let privateTable_ = Compound(Product({value: {elements: [
+]}})
+)
+let privateTable_ = Compound(
+  Product({value: {elements: [
     {name: Some("name"), algebraicType: String},
 
-]}}))
-let removeTable_ = Compound(Product({value: {elements: [
+]}})
+)
+let removeTable_ = Compound(
+  Product({value: {elements: [
     {name: Some("id"), algebraicType: U32},
 
-]}}))
-let repeatingTestArg_ = Compound(Product({value: {elements: [
+]}})
+)
+let repeatingTestArg_ = Compound(
+  Product({value: {elements: [
     {name: Some("scheduled_id"), algebraicType: U64},
 
     {name: Some("scheduled_at"), algebraicType: Compound(Sum({value: {variants: [{name: Some("Interval"), algebraicType: Compound(Product({value: {elements: [{name: Some("__time_duration_micros__"), algebraicType: I64}]}}))}, {name: Some("Time"), algebraicType: Compound(Product({value: {elements: [{name: Some("__timestamp_micros_since_unix_epoch__"), algebraicType: I64}]}}))}]}}))},
 
     {name: Some("prev_time"), algebraicType: Compound(Product({value: {elements: [{name: Some("__timestamp_micros_since_unix_epoch__"), algebraicType: I64}]}}))},
 
-]}}))
-let testA_ = Compound(Product({value: {elements: [
+]}})
+)
+let testA_ = Compound(
+  Product({value: {elements: [
     {name: Some("x"), algebraicType: U32},
 
     {name: Some("y"), algebraicType: U32},
 
     {name: Some("z"), algebraicType: String},
 
-]}}))
-let testB_ = Compound(Product({value: {elements: [
+]}})
+)
+let testB_ = Compound(
+  Product({value: {elements: [
     {name: Some("foo"), algebraicType: String},
 
-]}}))
-let namespaceTestC_ = Compound(Sum({value: {variants: [
+]}})
+)
+let namespaceTestC_ = Compound(
+  Sum({value: {variants: [
     {name: Some("Foo"), algebraicType: Compound(Product({value: {elements: []}}))},
 
     {name: Some("Bar"), algebraicType: Compound(Product({value: {elements: []}}))},
 
-]}}))
-let testD_ = Compound(Product({value: {elements: [
+]}})
+)
+let testD_ = Compound(
+  Product({value: {elements: [
     {name: Some("test_c"), algebraicType: Compound(Sum({value: {variants: [{name: Some("some"), algebraicType: namespaceTestC_}, {name: Some("none"), algebraicType: Compound(Product({value: {elements: []}}))}]}}))},
 
-]}}))
-let testE_ = Compound(Product({value: {elements: [
+]}})
+)
+let testE_ = Compound(
+  Product({value: {elements: [
     {name: Some("id"), algebraicType: U64},
 
     {name: Some("name"), algebraicType: String},
 
-]}}))
-let testFoobar_ = Compound(Product({value: {elements: [
+]}})
+)
+let testFoobar_ = Compound(
+  Product({value: {elements: [
     {name: Some("field"), algebraicType: foobar_},
 
-]}}))
-let namespaceTestF_ = Compound(Sum({value: {variants: [
+]}})
+)
+let namespaceTestF_ = Compound(
+  Sum({value: {variants: [
     {name: Some("Foo"), algebraicType: Compound(Product({value: {elements: []}}))},
 
     {name: Some("Bar"), algebraicType: Compound(Product({value: {elements: []}}))},
 
     {name: Some("Baz"), algebraicType: String},
 
-]}}))
+]}})
+)
 // ─── Remote module assembly ─────────────────────────────────────────
 
 let remoteModule: remoteModule = {
@@ -2147,6 +2239,18 @@ let allTableNames = [
   "my_player",
 ]
 
+// Non-event tables/views — safe for client subscription via SELECT * FROM.
+// Event tables (document_request, notification_event, etc.) are excluded because
+// they are broadcast-only and cannot be subscribed to.
+let subscribableTableNames = [
+  "logged_out_player",
+  "person",
+  "player",
+  "test_d",
+  "test_f",
+  "my_player",
+]
+
 let tables = makeQueryBuilder({tables: remoteModule.tables})
 let reducers = convertToAccessorMap(remoteModule.reducers)
 '''
@@ -2155,121 +2259,110 @@ let reducers = convertToAccessorMap(remoteModule.reducers)
 // WILL NOT BE SAVED. MODIFY THE SOURCE CONFIGURATION INSTEAD.
 
 
-// Server-side reducer wrappers — module functor with typed, async reducers.
+// Server-side reducer wrappers — module functor with typed reducer calls.
 //
 // Usage:
 //   module ServerReducers = StdbServerReducers.Make({
 //     let getConnection = () => ServerConn.getConnection()
 //   })
-//   let result = await ServerReducers.serverReducers.addPlayer({name: "Alice"})
+//   let result = ServerReducers.serverReducers.addPlayer({name: "Alice"})
 
 module Sdk = Stdb__Sdk
 module Reducers = Stdb__Reducers
+module Fx = Stdb__Fx
 
 module type Config = {
-  let getConnection: unit => promise<Sdk.connection>
+  let getConnection: unit => Fx.call<Sdk.connection<Sdk.remoteModule>>
 }
 
-module Make = (C: Config) => {
+module Make = (R: Fx.CALL_RUNTIME, C: Config) => {
 
-  let add = async (args: Reducers.Add.args) => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.Add.call_(args)
-  }
-
-
-  let addPlayer = async (args: Reducers.AddPlayer.args) => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.AddPlayer.call_(args)
-  }
+  let add = (args: Reducers.Add.args): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.Add.call_(args)->R.capture
+    )
 
 
-  let addPrivate = async (args: Reducers.AddPrivate.args) => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.AddPrivate.call_(args)
-  }
+  let addPlayer = (args: Reducers.AddPlayer.args): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.AddPlayer.call_(args)->R.capture
+    )
 
 
-  let assertCallerIdentityIsModuleIdentity = async () => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.AssertCallerIdentityIsModuleIdentity.call_
-  }
+  let addPrivate = (args: Reducers.AddPrivate.args): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.AddPrivate.call_(args)->R.capture
+    )
 
 
-  let deletePlayer = async (args: Reducers.DeletePlayer.args) => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.DeletePlayer.call_(args)
-  }
+  let assertCallerIdentityIsModuleIdentity = (): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.AssertCallerIdentityIsModuleIdentity.call_->R.capture
+    )
 
 
-  let deletePlayersByName = async (args: Reducers.DeletePlayersByName.args) => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.DeletePlayersByName.call_(args)
-  }
+  let deletePlayer = (args: Reducers.DeletePlayer.args): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.DeletePlayer.call_(args)->R.capture
+    )
 
 
-  let listOverAge = async (args: Reducers.ListOverAge.args) => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.ListOverAge.call_(args)
-  }
+  let deletePlayersByName = (args: Reducers.DeletePlayersByName.args): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.DeletePlayersByName.call_(args)->R.capture
+    )
 
 
-  let logModuleIdentity = async () => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.LogModuleIdentity.call_
-  }
+  let listOverAge = (args: Reducers.ListOverAge.args): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.ListOverAge.call_(args)->R.capture
+    )
 
 
-  let queryPrivate = async () => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.QueryPrivate.call_
-  }
+  let logModuleIdentity = (): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.LogModuleIdentity.call_->R.capture
+    )
 
 
-  let sayHello = async () => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.SayHello.call_
-  }
+  let queryPrivate = (): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.QueryPrivate.call_->R.capture
+    )
 
 
-  let test = async (args: Reducers.Test.args) => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.Test.call_(args)
-  }
+  let sayHello = (): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.SayHello.call_->R.capture
+    )
 
 
-  let testBtreeIndexArgs = async () => {
-    let conn = await C.getConnection()
-    await conn->Sdk.getReducers->Reducers.TestBtreeIndexArgs.call_
-  }
+  let test = (args: Reducers.Test.args): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.Test.call_(args)->R.capture
+    )
+
+
+  let testBtreeIndexArgs = (): Fx.call<result<unit, Fx.error>> =>
+    C.getConnection()->R.flatMap(conn =>
+      conn->Sdk.getReducers->Reducers.TestBtreeIndexArgs.call_->R.capture
+    )
 
 
 
   type serverReducers = {
-    add: Reducers.Add.args => promise<unit>,
-
-    addPlayer: Reducers.AddPlayer.args => promise<unit>,
-
-    addPrivate: Reducers.AddPrivate.args => promise<unit>,
-
-    assertCallerIdentityIsModuleIdentity: unit => promise<unit>,
-
-    deletePlayer: Reducers.DeletePlayer.args => promise<unit>,
-
-    deletePlayersByName: Reducers.DeletePlayersByName.args => promise<unit>,
-
-    listOverAge: Reducers.ListOverAge.args => promise<unit>,
-
-    logModuleIdentity: unit => promise<unit>,
-
-    queryPrivate: unit => promise<unit>,
-
-    sayHello: unit => promise<unit>,
-
-    test: Reducers.Test.args => promise<unit>,
-
-    testBtreeIndexArgs: unit => promise<unit>,
-
+    add: Reducers.Add.args => Fx.call<result<unit, Fx.error>>,
+    addPlayer: Reducers.AddPlayer.args => Fx.call<result<unit, Fx.error>>,
+    addPrivate: Reducers.AddPrivate.args => Fx.call<result<unit, Fx.error>>,
+    assertCallerIdentityIsModuleIdentity: unit => Fx.call<result<unit, Fx.error>>,
+    deletePlayer: Reducers.DeletePlayer.args => Fx.call<result<unit, Fx.error>>,
+    deletePlayersByName: Reducers.DeletePlayersByName.args => Fx.call<result<unit, Fx.error>>,
+    listOverAge: Reducers.ListOverAge.args => Fx.call<result<unit, Fx.error>>,
+    logModuleIdentity: unit => Fx.call<result<unit, Fx.error>>,
+    queryPrivate: unit => Fx.call<result<unit, Fx.error>>,
+    sayHello: unit => Fx.call<result<unit, Fx.error>>,
+    test: Reducers.Test.args => Fx.call<result<unit, Fx.error>>,
+    testBtreeIndexArgs: unit => Fx.call<result<unit, Fx.error>>,
   }
 
   let serverReducers: serverReducers = {
@@ -2313,7 +2406,7 @@ module TestF = Stdb__Tables__TestF
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
 module Display = Stdb__Display
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type t = {
@@ -2329,12 +2422,12 @@ type handle
 
 @send external iter: handle => Iterator.t<t> = "iter"
 
-@send external onInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "onInsert"
-@send external removeOnInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
-@send external onUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
-@send external removeOnUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
-@send external onDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "onDelete"
-@send external removeOnDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
+@send external onInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onInsert"
+@send external removeOnInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
+@send external onUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
+@send external removeOnUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
+@send external onDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onDelete"
+@send external removeOnDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
 
 // PK index
 type identityIndex
@@ -2368,7 +2461,7 @@ let subscribe = (handle: handle, handler: event => unit): (unit => unit) => {
 
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module MakeStream = (O: Async.OBSERVER) => {
+module MakeStream = (O: Fx.OBSERVER) => {
   let observe = (handle: handle): O.stream<event> => {
     let ins = O.fromCallback(emit => {
       let cb = (_ctx: Sdk.eventCtx, row: t) => emit(Inserted({row: row}))
@@ -2444,7 +2537,7 @@ let useRow = (id: Sdk.identity) =>
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
 module Display = Stdb__Display
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type t = {
@@ -2460,12 +2553,12 @@ type handle
 
 @send external iter: handle => Iterator.t<t> = "iter"
 
-@send external onInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "onInsert"
-@send external removeOnInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
-@send external onUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
-@send external removeOnUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
-@send external onDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "onDelete"
-@send external removeOnDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
+@send external onInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onInsert"
+@send external removeOnInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
+@send external onUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
+@send external removeOnUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
+@send external onDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onDelete"
+@send external removeOnDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
 
 let tableName = "my_player"
 
@@ -2491,7 +2584,7 @@ let subscribe = (handle: handle, handler: event => unit): (unit => unit) => {
 
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module MakeStream = (O: Async.OBSERVER) => {
+module MakeStream = (O: Fx.OBSERVER) => {
   let observe = (handle: handle): O.stream<event> => {
     let ins = O.fromCallback(emit => {
       let cb = (_ctx: Sdk.eventCtx, row: t) => emit(Inserted({row: row}))
@@ -2565,7 +2658,7 @@ let useDisplayRows = () => React.useTable(query)->Array.map(toDisplay)
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
 module Display = Stdb__Display
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type t = {
@@ -2581,12 +2674,12 @@ type handle
 
 @send external iter: handle => Iterator.t<t> = "iter"
 
-@send external onInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "onInsert"
-@send external removeOnInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
-@send external onUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
-@send external removeOnUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
-@send external onDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "onDelete"
-@send external removeOnDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
+@send external onInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onInsert"
+@send external removeOnInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
+@send external onUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
+@send external removeOnUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
+@send external onDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onDelete"
+@send external removeOnDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
 
 // PK index
 type idIndex
@@ -2620,7 +2713,7 @@ let subscribe = (handle: handle, handler: event => unit): (unit => unit) => {
 
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module MakeStream = (O: Async.OBSERVER) => {
+module MakeStream = (O: Fx.OBSERVER) => {
   let observe = (handle: handle): O.stream<event> => {
     let ins = O.fromCallback(emit => {
       let cb = (_ctx: Sdk.eventCtx, row: t) => emit(Inserted({row: row}))
@@ -2696,7 +2789,7 @@ let useRow = (id: int) =>
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
 module Display = Stdb__Display
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type t = {
@@ -2712,12 +2805,12 @@ type handle
 
 @send external iter: handle => Iterator.t<t> = "iter"
 
-@send external onInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "onInsert"
-@send external removeOnInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
-@send external onUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
-@send external removeOnUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
-@send external onDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "onDelete"
-@send external removeOnDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
+@send external onInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onInsert"
+@send external removeOnInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
+@send external onUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
+@send external removeOnUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
+@send external onDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onDelete"
+@send external removeOnDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
 
 // PK index
 type identityIndex
@@ -2751,7 +2844,7 @@ let subscribe = (handle: handle, handler: event => unit): (unit => unit) => {
 
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module MakeStream = (O: Async.OBSERVER) => {
+module MakeStream = (O: Fx.OBSERVER) => {
   let observe = (handle: handle): O.stream<event> => {
     let ins = O.fromCallback(emit => {
       let cb = (_ctx: Sdk.eventCtx, row: t) => emit(Inserted({row: row}))
@@ -2827,7 +2920,7 @@ let useRow = (id: Sdk.identity) =>
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
 module Display = Stdb__Display
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type t = {
@@ -2839,12 +2932,12 @@ type handle
 
 @send external iter: handle => Iterator.t<t> = "iter"
 
-@send external onInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "onInsert"
-@send external removeOnInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
-@send external onUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
-@send external removeOnUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
-@send external onDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "onDelete"
-@send external removeOnDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
+@send external onInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onInsert"
+@send external removeOnInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
+@send external onUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
+@send external removeOnUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
+@send external onDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onDelete"
+@send external removeOnDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
 
 let tableName = "test_d"
 
@@ -2870,7 +2963,7 @@ let subscribe = (handle: handle, handler: event => unit): (unit => unit) => {
 
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module MakeStream = (O: Async.OBSERVER) => {
+module MakeStream = (O: Fx.OBSERVER) => {
   let observe = (handle: handle): O.stream<event> => {
     let ins = O.fromCallback(emit => {
       let cb = (_ctx: Sdk.eventCtx, row: t) => emit(Inserted({row: row}))
@@ -2940,7 +3033,7 @@ let useDisplayRows = () => React.useTable(query)->Array.map(toDisplay)
 module Sdk = Stdb__Sdk
 module Types = Stdb__Types
 module Display = Stdb__Display
-module Async = Stdb__Async
+module Fx = Stdb__Fx
 module React = Stdb__React
 
 type t = {
@@ -2952,12 +3045,12 @@ type handle
 
 @send external iter: handle => Iterator.t<t> = "iter"
 
-@send external onInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "onInsert"
-@send external removeOnInsert: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
-@send external onUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
-@send external removeOnUpdate: (handle, (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
-@send external onDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "onDelete"
-@send external removeOnDelete: (handle, (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
+@send external onInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onInsert"
+@send external removeOnInsert: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnInsert"
+@send external onUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "onUpdate"
+@send external removeOnUpdate: (handle, @uncurry (Sdk.eventCtx, t, t) => unit) => unit = "removeOnUpdate"
+@send external onDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "onDelete"
+@send external removeOnDelete: (handle, @uncurry (Sdk.eventCtx, t) => unit) => unit = "removeOnDelete"
 
 let tableName = "test_f"
 
@@ -2983,7 +3076,7 @@ let subscribe = (handle: handle, handler: event => unit): (unit => unit) => {
 
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module MakeStream = (O: Async.OBSERVER) => {
+module MakeStream = (O: Fx.OBSERVER) => {
   let observe = (handle: handle): O.stream<event> => {
     let ins = O.fromCallback(emit => {
       let cb = (_ctx: Sdk.eventCtx, row: t) => emit(Inserted({row: row}))

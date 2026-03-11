@@ -1,6 +1,6 @@
 //! `{root}__Hooks.res` — observer-backed hooks + connection framework.
 //!
-//! Emitted when `async_style ∈ {Observer, All}`. Provides:
+//! Emitted when observer support is enabled. Provides:
 //! - Connection context (`Provider`, `useConnection`, `useConnectionInfo`)
 //! - Generic `useRows` hook (works with any table via `tableConfig`)
 //! - Generic `useCallWith` / `useCallUnit` hooks (works with any reducer)
@@ -16,6 +16,10 @@ use crate::OutputFile;
 pub(super) fn generate_hooks_file(root_module: &str) -> OutputFile {
     OutputFile {
         filename: format!("{root_module}__Hooks.res"),
-        code: StdbHooksRes { root_module }.to_string(),
+        code: StdbHooksRes {
+            root_module,
+            fx_module: &format!("{root_module}__Fx"),
+        }
+        .to_string(),
     }
 }

@@ -1,6 +1,6 @@
 
 // ── Observer mode ─────────────────────────────────────────────────────────────
-module MakeStream = (O: Async.OBSERVER) => {
+module MakeStream = (O: Fx.OBSERVER) => {
   let observe = (handle: handle): O.stream<event> => {
     let ins = O.fromCallback(emit => {
       let cb = (_ctx: Sdk.eventCtx, row: t) => emit(Inserted({row: row}))

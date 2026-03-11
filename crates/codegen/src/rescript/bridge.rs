@@ -1,6 +1,6 @@
 //! `{root}__Bridge.res` — per-schema table configs for observer hooks.
 //!
-//! Emitted when `async_style ∈ {Observer, All}`. Contains one `let` binding
+//! Emitted when observer support is enabled. Contains one `let` binding
 //! per table, each producing a `Hooks.tableConfig<Table.t>` via `Hooks.mkTable`.
 //!
 //! Consumer usage:

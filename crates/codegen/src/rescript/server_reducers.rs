@@ -46,9 +46,12 @@ pub(super) fn generate_server_reducers_file(
         .iter()
         .map(|r| {
             if r.has_args {
-                format!("    {}: {}.args => promise<unit>,", r.name_camel, r.module)
+                format!(
+                    "    {}: {}.args => Fx.call<result<unit, Fx.error>>,",
+                    r.name_camel, r.module
+                )
             } else {
-                format!("    {}: unit => promise<unit>,", r.name_camel)
+                format!("    {}: unit => Fx.call<result<unit, Fx.error>>,", r.name_camel)
             }
         })
         .collect::<Vec<_>>()
@@ -60,7 +63,7 @@ pub(super) fn generate_server_reducers_file(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let opens = sibling_opens(root_module, &["Sdk", "Reducers"]);
+    let opens = sibling_opens(root_module, &["Sdk", "Reducers", "Fx"]);
     OutputFile {
         filename: format!("{root_module}__ServerReducers.res"),
         code: StdbServerReducersRes {

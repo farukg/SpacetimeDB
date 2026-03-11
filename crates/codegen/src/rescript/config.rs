@@ -8,13 +8,13 @@
 //!
 //! ```toml
 //! root_module = "Stdb"
-//! async_style = "all"              # "promise" | "observer" | "all"
-//! field_naming = "camelCase"        # "camelCase" | "snake_case"
+//! call_mode = "observer"          # "hooks" | "observer" | "combined"
+//! field_naming = "camelCase"      # "camelCase" | "snake_case"
 //! output_dir_strategy = "subdirectories"  # "flat" | "subdirectories"
-//! table_style = "inline"           # "inline" | "functor"
+//! table_style = "inline"          # "inline" | "functor"
 //! ```
 
-use crate::AsyncStyle;
+use crate::CallMode;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -51,12 +51,12 @@ pub struct RescriptCodegenConfig {
     /// Becomes the file prefix: `Stdb__Types.res`, `Stdb__Schema.res`, etc.
     pub root_module: String,
 
-    /// Controls what async/reactive API surface is emitted.
-    /// - `"promise"`: React hooks + promise only.
+    /// Controls what call surface is emitted.
+    /// - `"hooks"`: SDK-native React hooks only.
     /// - `"observer"`: Module functor API only, no React hooks.
-    /// - `"all"` (default): Both React hooks and observer functors.
-    #[serde(deserialize_with = "deserialize_async_style")]
-    pub async_style: AsyncStyle,
+    /// - `"combined"` (default): Both hook and observer surfaces.
+    #[serde(deserialize_with = "deserialize_call_mode")]
+    pub call_mode: CallMode,
 
     /// Record field naming strategy.
     /// - `"camelCase"` (default): fields use camelCase + `@as("snake_case")`.
@@ -78,7 +78,7 @@ impl Default for RescriptCodegenConfig {
     fn default() -> Self {
         Self {
             root_module: "Stdb".to_string(),
-            async_style: AsyncStyle::All,
+            call_mode: CallMode::Combined,
             field_naming: FieldNaming::CamelCase,
             output_dir_strategy: OutputDirStrategy::Subdirectories,
             table_style: TableStyle::Inline,
@@ -96,17 +96,17 @@ pub enum FieldNaming {
     SnakeCase,
 }
 
-fn deserialize_async_style<'de, D>(deserializer: D) -> Result<AsyncStyle, D::Error>
+fn deserialize_call_mode<'de, D>(deserializer: D) -> Result<CallMode, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
     match s.as_str() {
-        "promise" => Ok(AsyncStyle::Promise),
-        "observer" => Ok(AsyncStyle::Observer),
-        "all" => Ok(AsyncStyle::All),
+        "hooks" => Ok(CallMode::Hooks),
+        "observer" => Ok(CallMode::Observer),
+        "combined" => Ok(CallMode::Combined),
         other => Err(serde::de::Error::custom(format!(
-            "unknown async_style '{other}', expected 'promise', 'observer', or 'all'"
+            "unknown call_mode '{other}', expected 'hooks', 'observer', or 'combined'"
         ))),
     }
 }
@@ -140,7 +140,7 @@ mod tests {
     fn test_default_config() {
         let config = RescriptCodegenConfig::default();
         assert_eq!(config.root_module, "Stdb");
-        assert_eq!(config.async_style, AsyncStyle::All);
+        assert_eq!(config.call_mode, CallMode::Combined);
         assert_eq!(config.field_naming, FieldNaming::CamelCase);
     }
 
@@ -149,19 +149,19 @@ mod tests {
         let toml_str = "";
         let config: RescriptCodegenConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.root_module, "Stdb");
-        assert_eq!(config.async_style, AsyncStyle::All);
+        assert_eq!(config.call_mode, CallMode::Combined);
     }
 
     #[test]
     fn test_parse_full_toml() {
         let toml_str = r#"
 root_module = "App"
-async_style = "observer"
+call_mode = "observer"
 field_naming = "snake_case"
 "#;
         let config: RescriptCodegenConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.root_module, "App");
-        assert_eq!(config.async_style, AsyncStyle::Observer);
+        assert_eq!(config.call_mode, CallMode::Observer);
         assert_eq!(config.field_naming, FieldNaming::SnakeCase);
     }
 
@@ -170,7 +170,7 @@ field_naming = "snake_case"
         let toml_str = r#"root_module = "MyDb""#;
         let config: RescriptCodegenConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.root_module, "MyDb");
-        assert_eq!(config.async_style, AsyncStyle::All); // default
+        assert_eq!(config.call_mode, CallMode::Combined); // default
         assert_eq!(config.field_naming, FieldNaming::CamelCase); // default
     }
 
@@ -186,12 +186,12 @@ another_thing = "hello"
     }
 
     #[test]
-    fn test_invalid_async_style() {
-        let toml_str = r#"async_style = "invalid""#;
+    fn test_invalid_call_mode() {
+        let toml_str = r#"call_mode = "invalid""#;
         let result: Result<RescriptCodegenConfig, _> = toml::from_str(toml_str);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("unknown async_style"));
+        assert!(err.contains("unknown call_mode"));
     }
 
     #[test]
@@ -199,7 +199,7 @@ another_thing = "hello"
         let temp = tempfile::TempDir::new().unwrap();
         let config = load_config(&[temp.path()]).unwrap();
         assert_eq!(config.root_module, "Stdb");
-        assert_eq!(config.async_style, AsyncStyle::All);
+        assert_eq!(config.call_mode, CallMode::Combined);
     }
 
     #[test]
@@ -208,13 +208,13 @@ another_thing = "hello"
         std::fs::write(
             temp.path().join(CONFIG_FILENAME),
             r#"root_module = "VR"
-async_style = "promise"
+call_mode = "hooks"
 "#,
         )
         .unwrap();
         let config = load_config(&[temp.path()]).unwrap();
         assert_eq!(config.root_module, "VR");
-        assert_eq!(config.async_style, AsyncStyle::Promise);
+        assert_eq!(config.call_mode, CallMode::Hooks);
     }
 
     #[test]

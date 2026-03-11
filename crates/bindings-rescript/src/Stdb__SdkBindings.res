@@ -164,6 +164,7 @@ type dbConnectionBuilder<'conn>
 @genType.import(("spacetimedb", "DbConnectionImpl"))
 type dbConnectionImpl<'rm>
 type dbConfig
+type callbackIssue = Stdb__CallSupport.callbackIssue
 
 @new @module("spacetimedb/sdk")
 external makeDbConnectionBuilder: ('remoteModule, dbConfig => dbConnectionImpl<'a>) => dbConnectionBuilder<'a> =
@@ -192,13 +193,13 @@ external onConnect: (
 @send
 external onConnectError: (
   dbConnectionBuilder<'a>,
-  ('ctx, JsExn.t) => unit,
+  ('ctx, callbackIssue) => unit,
 ) => dbConnectionBuilder<'a> = "onConnectError"
 
 @send
 external onDisconnect: (
   dbConnectionBuilder<'a>,
-  ('ctx, option<JsExn.t>) => unit,
+  ('ctx, option<callbackIssue>) => unit,
 ) => dbConnectionBuilder<'a> = "onDisconnect"
 
 // Terminal — builds and returns the connection
@@ -235,7 +236,7 @@ type subscriptionHandle<'rm>
 external onApplied: (subscriptionBuilder<'a>, 'ctx => unit) => subscriptionBuilder<'a> = "onApplied"
 
 @send
-external onSubError: (subscriptionBuilder<'a>, ('ctx, JsExn.t) => unit) => subscriptionBuilder<'a> = "onError"
+external onSubError: (subscriptionBuilder<'a>, ('ctx, callbackIssue) => unit) => subscriptionBuilder<'a> = "onError"
 
 @send
 external subscribe: (subscriptionBuilder<'a>, array<string>) => subscriptionHandle<'a> = "subscribe"
@@ -306,13 +307,5 @@ module React = {
   external useSpacetimeDB: unit => connectionState = "useSpacetimeDB"
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Utilities
-// ═══════════════════════════════════════════════════════════════════════
-
-@val @scope("Promise")
-external promiseRace: array<promise<'a>> => promise<'a> = "race"
-
 @val external setTimeout: (unit => unit, int) => float = "setTimeout"
-
 

@@ -9,7 +9,7 @@
 use super::helpers::{procedure_module_name, reducer_module_name, table_module_name};
 use super::templates::{AutoGenHeaderRes, ModuleAliasRes, NamespaceGatewayRes};
 use crate::util::{is_reducer_invokable, iter_procedures, iter_reducers, iter_table_names_and_types};
-use crate::{AsyncStyle, CodegenOptions, OutputFile};
+use crate::{CallMode, CodegenOptions, OutputFile};
 
 use convert_case::{Case, Casing};
 use spacetimedb_schema::def::ModuleDef;
@@ -26,7 +26,7 @@ pub(super) fn generate_gateway_files(
     module: &ModuleDef,
     options: &CodegenOptions,
     root_module: &str,
-    async_style: AsyncStyle,
+    call_mode: CallMode,
 ) -> Vec<OutputFile> {
     let mut files = Vec::new();
 
@@ -152,9 +152,8 @@ pub(super) fn generate_gateway_files(
         },
     ];
 
-    // React/Provider: only alias when async_style ∈ {Promise, All}.
-    // Observer-only mode doesn't generate these files.
-    if async_style != AsyncStyle::Observer {
+    // React/Provider: only alias when hook surface is enabled.
+    if call_mode != CallMode::Observer {
         root_aliases_data.push(AliasData {
             alias: "React".to_string(),
             target: format!("{root_module}__React"),
@@ -172,11 +171,30 @@ pub(super) fn generate_gateway_files(
         });
     }
 
-    if async_style != AsyncStyle::Promise {
+    if call_mode != CallMode::Hooks {
         root_aliases_data.push(AliasData {
-            alias: "Async".to_string(),
-            target: format!("{root_module}__Async"),
+            alias: "CallRuntime".to_string(),
+            target: format!("{root_module}__CallRuntime"),
         });
+        root_aliases_data.push(AliasData {
+            alias: "FileBytes".to_string(),
+            target: format!("{root_module}__FileBytes"),
+        });
+    }
+
+    if call_mode != CallMode::Observer {
+        root_aliases_data.push(AliasData {
+            alias: "HookRuntime".to_string(),
+            target: format!("{root_module}__HookRuntime"),
+        });
+    }
+
+    root_aliases_data.push(AliasData {
+        alias: "Fx".to_string(),
+        target: format!("{root_module}__Fx"),
+    });
+
+    if call_mode != CallMode::Hooks {
         root_aliases_data.push(AliasData {
             alias: "Hooks".to_string(),
             target: format!("{root_module}__Hooks"),

@@ -71,7 +71,6 @@ let subscribe = Stdb__SdkBindings.subscribe
 let fromSdkResult = Stdb__SdkBindings.fromSdkResult
 
 // Utilities
-let promiseRace = Stdb__SdkBindings.promiseRace
 let setTimeout = Stdb__SdkBindings.setTimeout
 
 // Opaque types used by codegen templates

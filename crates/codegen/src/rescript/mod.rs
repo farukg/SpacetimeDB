@@ -1,6 +1,6 @@
 //! ReScript codegen for SpacetimeDB.
 //!
-//! Generates `.res` and `.mjs` files from a SpacetimeDB module definition.
+//! Generates `.res` files from a SpacetimeDB module definition.
 //! Split into submodules by concern:
 //!
 //! - `templates` — `#[derive(Boilerplate)]` struct definitions (3-layer composition)
@@ -32,7 +32,7 @@ mod topo;
 mod types;
 
 use crate::util::{is_reducer_invokable, iter_reducers, iter_table_names_and_types};
-use crate::{AsyncStyle, CodegenOptions, OutputFile};
+use crate::{CallMode, CodegenOptions, OutputFile};
 
 use super::Lang;
 use helpers::{
@@ -41,8 +41,9 @@ use helpers::{
 };
 use templates::{
     AutoGenHeaderRes, EffectCallMakeFunctorRes, PkIndexSectionRes, ProcedureFileRes, ReducerFileRes,
-    ReducerReactHookSectionRes, ReducerServerFileRes, StdbAsyncRes, TableEventSectionRes, TableFileRes,
-    TableFunctorRes, TableObserverSectionRes, TableReactHookSectionRes,
+    ReducerReactHookSectionRes, ReducerServerFileRes, StdbCallRuntimeRes, StdbFileBytesRes, StdbFxRes,
+    StdbHookRuntimeRes, TableEventSectionRes, TableFileRes, TableFunctorRes, TableObserverSectionRes,
+    TableReactHookSectionRes,
 };
 
 use convert_case::{Case, Casing};
@@ -52,7 +53,7 @@ use std::ops::Deref;
 use std::path::PathBuf;
 
 pub struct ReScript {
-    pub async_style: AsyncStyle,
+    pub call_mode: CallMode,
     pub root_module: String,
     pub output_dir_strategy: config::OutputDirStrategy,
     pub table_style: config::TableStyle,
@@ -123,10 +124,10 @@ impl Lang for ReScript {
         // Display projection: type display + let toDisplay.
         let display_section = display_projection::render_display_section(module, &product_def.elements, root_module);
 
-        // Emit React hooks when async_style ∈ {Promise, All}.
+        // Emit React hooks when the hook surface is enabled.
         let react_hooks_str;
-        let react_hooks: &str = match self.async_style {
-            AsyncStyle::Promise | AsyncStyle::All => {
+        let react_hooks: &str = match self.call_mode {
+            CallMode::Hooks | CallMode::Combined => {
                 // Detect if PK type is Sdk.identity (opaque JS class requiring identityIsEqual).
                 let pk_is_identity = pk_type_str == "Sdk.identity";
                 react_hooks_str = TableReactHookSectionRes {
@@ -141,7 +142,7 @@ impl Lang for ReScript {
                 .to_string();
                 &react_hooks_str
             }
-            AsyncStyle::Observer => "",
+            CallMode::Observer => "",
         };
 
         match self.table_style {
@@ -181,14 +182,14 @@ impl Lang for ReScript {
                 // Always emit the typed event union + subscribe.
                 let event_section = TableEventSectionRes.to_string();
 
-                // Emit observer functor when async_style ∈ {Observer, All}.
+                // Emit observer functor when observer support is enabled.
                 let observer_section_str;
-                let observer_section: &str = match self.async_style {
-                    AsyncStyle::Observer | AsyncStyle::All => {
+                let observer_section: &str = match self.call_mode {
+                    CallMode::Observer | CallMode::Combined => {
                         observer_section_str = TableObserverSectionRes.to_string();
                         &observer_section_str
                     }
-                    AsyncStyle::Promise => "",
+                    CallMode::Hooks => "",
                 };
 
                 let mut table_siblings: Vec<&str> = vec!["Sdk", "Types"];
@@ -196,7 +197,7 @@ impl Lang for ReScript {
                     table_siblings.push("Display");
                 }
                 if !observer_section.is_empty() {
-                    table_siblings.push("Async");
+                    table_siblings.push("Fx");
                 }
                 if !react_hooks.is_empty() {
                     table_siblings.push("React");
@@ -239,15 +240,15 @@ impl Lang for ReScript {
         let camel_accessor = rescript_field_name(reducer.accessor_name.deref().to_case(Case::Camel));
         let elements = &reducer.params_for_generate.elements;
 
-        // Pre-render Make functor when async_style ∈ {Observer, All}.
+        // Pre-render Make functor when observer support is enabled.
         let make_functor_no_args_str;
         let make_functor_with_args_str;
 
         if elements.is_empty() {
-            // Pre-render React hooks when async_style ∈ {Promise, All}.
+            // Pre-render React hooks when the hook surface is enabled.
             let react_hooks_str;
-            let react_hooks: &str = match self.async_style {
-                AsyncStyle::Promise | AsyncStyle::All => {
+            let react_hooks: &str = match self.call_mode {
+                CallMode::Hooks | CallMode::Combined => {
                     react_hooks_str = ReducerReactHookSectionRes {
                         params_type: "unit",
                         camel_accessor: &camel_accessor,
@@ -256,34 +257,33 @@ impl Lang for ReScript {
                     .to_string();
                     &react_hooks_str
                 }
-                AsyncStyle::Observer => "",
+                CallMode::Observer => "",
             };
 
-            let make_functor: &str = match self.async_style {
-                AsyncStyle::Observer | AsyncStyle::All => {
+            let make_functor: &str = match self.call_mode {
+                CallMode::Observer | CallMode::Combined => {
                     make_functor_no_args_str = EffectCallMakeFunctorRes {
-                        effect_runtime_module_type: "Async.EFFECT_RUNTIME",
+                        effect_runtime_module_type: "Fx.CALL_RUNTIME",
                         conn_type: "Sdk.connection<Sdk.remoteModule>",
                         has_args: false,
                         arg_type: "args",
                         response_type: "unit",
-                        error_type: "exn",
+                        error_type: "Fx.error",
                         call_expr_with_args: "conn->Sdk.getReducers->call_(callArgs)",
                         call_expr_no_args: "conn->Sdk.getReducers->call_",
-                        success_mapper: "_ => Promise.resolve(Ok())",
                     }
                     .to_string();
                     &make_functor_no_args_str
                 }
-                AsyncStyle::Promise => "",
+                CallMode::Hooks => "",
             };
 
             // No-args reducer: needs Sdk (connection + opaque reducers).
-            // Async is needed when make_functor is non-empty (observer mode).
+            // Fx is needed when make_functor is non-empty.
             // React is needed when react_hooks is non-empty.
             let mut no_args_siblings: Vec<&str> = vec!["Sdk"];
             if !make_functor.is_empty() {
-                no_args_siblings.push("Async");
+                no_args_siblings.push("Fx");
             }
             if !react_hooks.is_empty() {
                 no_args_siblings.push("React");
@@ -307,10 +307,10 @@ impl Lang for ReScript {
             // Pre-render args record type.
             let args_record = render_record_type(module, "args", elements, TypeRefStyle::ViaGateway, root_module);
 
-            // Pre-render React hooks when async_style ∈ {Promise, All}.
+            // Pre-render React hooks when the hook surface is enabled.
             let react_hooks_str;
-            let react_hooks: &str = match self.async_style {
-                AsyncStyle::Promise | AsyncStyle::All => {
+            let react_hooks: &str = match self.call_mode {
+                CallMode::Hooks | CallMode::Combined => {
                     react_hooks_str = ReducerReactHookSectionRes {
                         params_type: "args",
                         camel_accessor: &camel_accessor,
@@ -319,34 +319,33 @@ impl Lang for ReScript {
                     .to_string();
                     &react_hooks_str
                 }
-                AsyncStyle::Observer => "",
+                CallMode::Observer => "",
             };
 
-            let make_functor: &str = match self.async_style {
-                AsyncStyle::Observer | AsyncStyle::All => {
+            let make_functor: &str = match self.call_mode {
+                CallMode::Observer | CallMode::Combined => {
                     make_functor_with_args_str = EffectCallMakeFunctorRes {
-                        effect_runtime_module_type: "Async.EFFECT_RUNTIME",
+                        effect_runtime_module_type: "Fx.CALL_RUNTIME",
                         conn_type: "Sdk.connection<Sdk.remoteModule>",
                         has_args: true,
                         arg_type: "args",
                         response_type: "unit",
-                        error_type: "exn",
+                        error_type: "Fx.error",
                         call_expr_with_args: "conn->Sdk.getReducers->call_(callArgs)",
                         call_expr_no_args: "conn->Sdk.getReducers->call_",
-                        success_mapper: "_ => Promise.resolve(Ok())",
                     }
                     .to_string();
                     &make_functor_with_args_str
                 }
-                AsyncStyle::Promise => "",
+                CallMode::Hooks => "",
             };
 
             // With-args reducer: needs Sdk (connection + opaque reducers), Types (args field types).
-            // Async is needed when make_functor is non-empty (observer mode).
+            // Fx is needed when make_functor is non-empty.
             // React is needed when react_hooks is non-empty.
             let mut with_args_siblings: Vec<&str> = vec!["Sdk", "Types"];
             if !make_functor.is_empty() {
-                with_args_siblings.push("Async");
+                with_args_siblings.push("Fx");
             }
             if !react_hooks.is_empty() {
                 with_args_siblings.push("React");
@@ -410,32 +409,39 @@ impl Lang for ReScript {
             _ => (false, "", ""),
         };
 
-        // Pre-render Make functor when async_style ∈ {Observer, All}.
+        // Pre-render Make functor when observer support is enabled.
         let make_functor_str;
-        let make_functor: &str = match self.async_style {
-            AsyncStyle::Observer | AsyncStyle::All => {
+        let make_functor: &str = match self.call_mode {
+            CallMode::Observer | CallMode::Combined => {
                 make_functor_str = EffectCallMakeFunctorRes {
-                    effect_runtime_module_type: "Async.EFFECT_RUNTIME",
+                    effect_runtime_module_type: "Fx.CALL_RUNTIME",
                     conn_type: "Sdk.connection<Sdk.remoteModule>",
                     has_args,
                     arg_type: "params",
                     response_type: "response",
-                    error_type: "exn",
-                    call_expr_with_args: "call(conn, callArgs)",
-                    call_expr_no_args: "call(conn)",
-                    success_mapper: "v => Promise.resolve(Ok(v))",
+                    error_type: "Fx.error",
+                    call_expr_with_args: if is_result {
+                        "callRaw(conn, callArgs)->E.map(Sdk.fromSdkResult)"
+                    } else {
+                        "call(conn, callArgs)"
+                    },
+                    call_expr_no_args: if is_result {
+                        "callRaw(conn)->E.map(Sdk.fromSdkResult)"
+                    } else {
+                        "call(conn)"
+                    },
                 }
                 .to_string();
                 &make_functor_str
             }
-            AsyncStyle::Promise => "",
+            CallMode::Hooks => "",
         };
 
-        // Build sibling opens: Sdk, Client, Types (+ Async when functor present).
+        // Build sibling opens: Sdk, Client, Types (+ Fx when functor present).
         // Procedure file: needs Sdk (connection + opaque procedures), Types (params/response field types).
         let mut siblings: Vec<&str> = vec!["Sdk", "Types"];
         if !make_functor.is_empty() {
-            siblings.push("Async");
+            siblings.push("Fx");
         }
         let sibling_opens = sibling_opens(root_module, &siblings);
 
@@ -465,7 +471,8 @@ impl Lang for ReScript {
     /// - {root}__React.res, {root}__Display.res
     /// - {root}__ServerReducers.res
     /// - {root}__Sdk.res (re-export shim)
-    /// - {root}__Async.res (when async_style ≠ Promise)
+    /// - {root}__Fx.res
+    /// - {root}__HookRuntime.res (when hook support is enabled)
     /// - {root}__Procedures.res (when procedures exist)
     fn generate_global_files(&self, module: &ModuleDef, options: &CodegenOptions) -> Vec<OutputFile> {
         let root_module = &self.root_module;
@@ -484,10 +491,10 @@ impl Lang for ReScript {
             server_reducers::generate_server_reducers_file(module, options, root_module),
             display::generate_display_file(module, root_module),
         ];
-        // React/Provider: only emit when async_style ∈ {Promise, All}.
+        // React/Provider: only emit when the hook surface is enabled.
         // Observer-only mode must never import @spacetimedb/rescript/react
         // (which calls React.createContext at module init — crashing server-side Node).
-        if self.async_style != AsyncStyle::Observer {
+        if self.call_mode != CallMode::Observer {
             files.extend(react::generate_react_file(module, root_module));
         }
         // Namespace gateways: root, tables, reducers, procedures.
@@ -495,7 +502,7 @@ impl Lang for ReScript {
             module,
             options,
             root_module,
-            self.async_style,
+            self.call_mode,
         ));
         // Re-export shim: {root_module}__Sdk.res includes the runtime Stdb__Sdk module.
         // Skip when root_module == "Stdb" — the runtime package already provides Stdb__Sdk.res;
@@ -506,20 +513,42 @@ impl Lang for ReScript {
                 code: format!("{header}\ninclude Stdb__Sdk\n", header = AutoGenHeaderRes,),
             });
         }
-        if self.async_style != AsyncStyle::Promise {
+        if self.call_mode != CallMode::Hooks {
             files.push(OutputFile {
-                filename: format!("{root_module}__Async.res"),
-                code: StdbAsyncRes.to_string(),
+                filename: format!("{root_module}__Fx.res"),
+                code: StdbFxRes.to_string(),
+            });
+            files.push(OutputFile {
+                filename: format!("{root_module}__CallRuntime.res"),
+                code: StdbCallRuntimeRes { root_module }.to_string(),
+            });
+            files.push(OutputFile {
+                filename: format!("{root_module}__FileBytes.res"),
+                code: StdbFileBytesRes.to_string(),
             });
             files.push(hooks::generate_hooks_file(root_module));
             files.push(bridge::generate_bridge_file(module, options, root_module));
+        } else {
+            files.push(OutputFile {
+                filename: format!("{root_module}__Fx.res"),
+                code: format!(
+                    "{header}\ninclude {root_module}__HookRuntime\n",
+                    header = AutoGenHeaderRes,
+                ),
+            });
+        }
+        if self.call_mode != CallMode::Observer {
+            files.push(OutputFile {
+                filename: format!("{root_module}__HookRuntime.res"),
+                code: StdbHookRuntimeRes.to_string(),
+            });
         }
         // TableFunctor: shared module type + Make functor (only in functor mode).
         if self.table_style == config::TableStyle::Functor {
-            let has_observer = self.async_style != AsyncStyle::Promise;
+            let has_observer = self.call_mode != CallMode::Hooks;
             let mut functor_siblings: Vec<&str> = vec!["Sdk"];
             if has_observer {
-                functor_siblings.push("Async");
+                functor_siblings.push("Fx");
             }
             let functor_opens = sibling_opens(root_module, &functor_siblings);
             files.push(OutputFile {
@@ -542,7 +571,7 @@ impl Lang for ReScript {
         if !labels_file.code.is_empty() {
             files.push(labels_file);
         }
-        // Per-reducer server files: typed error return via try/catch.
+        // Per-reducer server files: typed error return via runtime capture.
         for reducer in iter_reducers(module, options.visibility) {
             if !is_reducer_invokable(reducer) {
                 continue;
@@ -551,7 +580,7 @@ impl Lang for ReScript {
             let reducer_mod_dotted = format!("Reducers.{}", reducer.name.deref().to_case(Case::Pascal));
             let reducer_mod = reducer_module_name(root_module, &reducer.name);
             // Server file: needs Sdk (connection + opaque reducers), Reducers (for `open Reducers.Foo`).
-            let server_opens = sibling_opens(root_module, &["Sdk", "Reducers"]);
+            let server_opens = sibling_opens(root_module, &["Sdk", "Reducers", "Fx"]);
             files.push(OutputFile {
                 filename: format!("{reducer_mod}__Server.res"),
                 code: ReducerServerFileRes {

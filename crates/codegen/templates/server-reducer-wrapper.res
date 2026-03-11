@@ -1,12 +1,12 @@
 %% if self.has_args {
-  let {{self.name_camel}} = async (args: {{self.module}}.args) => {
+  let {{self.name_camel}} = (args: {{self.module}}.args): Fx.call<result<unit, Fx.error>> =>
 %% } else {
-  let {{self.name_camel}} = async () => {
+  let {{self.name_camel}} = (): Fx.call<result<unit, Fx.error>> =>
 %% }
-    let conn = await C.getConnection()
+    C.getConnection()->R.flatMap(conn =>
 %% if self.has_args {
-    await conn->Sdk.getReducers->{{self.module}}.call_(args)
+      conn->Sdk.getReducers->{{self.module}}.call_(args)->R.capture
 %% } else {
-    await conn->Sdk.getReducers->{{self.module}}.call_
+      conn->Sdk.getReducers->{{self.module}}.call_->R.capture
 %% }
-  }
+    )

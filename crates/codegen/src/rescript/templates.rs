@@ -34,7 +34,7 @@ pub(super) struct DbFieldRes<'a> {
 }
 
 /// A `type reducers` field in StdbClient.
-/// Renders: `  @as("accessor") camel: args_type => promise<unit>,`
+/// Renders: `  @as("accessor") camel: args_type => Fx.call<unit>,`
 /// `accessor` = raw camelCase JS runtime key, `camel` = escaped ReScript field name.
 #[derive(Boilerplate)]
 pub(super) struct ReducerFieldRes<'a> {
@@ -47,7 +47,7 @@ pub(super) struct ReducerFieldRes<'a> {
 }
 
 /// A `type procedures` field in StdbClient.
-/// Renders: `  @as("accessor") camel: params_type => promise<response_type>,`
+/// Renders: `  @as("accessor") camel: params_type => Fx.call<response_type>,`
 /// `accessor` = raw camelCase JS runtime key, `camel` = escaped ReScript field name.
 #[derive(Boilerplate)]
 pub(super) struct ProcedureFieldRes<'a> {
@@ -97,7 +97,7 @@ pub(super) struct ReducerReactHookSectionRes<'a> {
     pub schema_module_path: &'a str,
 }
 
-/// A single server reducer async wrapper function.
+/// A single server reducer call wrapper function.
 #[derive(Boilerplate)]
 pub(super) struct ServerReducerWrapperRes<'a> {
     pub name_camel: &'a str,
@@ -131,6 +131,7 @@ pub(super) struct StdbClientRes<'a> {
 #[derive(Boilerplate)]
 pub(super) struct StdbApiRes<'a> {
     pub header: AutoGenHeaderRes,
+    pub fx_module: &'a str,
     pub reducer_fields: Vec<ReducerFieldRes<'a>>,
     pub procedure_fields: Vec<ProcedureFieldRes<'a>>,
     pub sdk_module: &'a str,
@@ -148,10 +149,10 @@ pub(super) struct TableFileRes<'a> {
     pub table_name: &'a str,
     /// Pre-rendered typed event union + subscribe (inline mode only).
     pub event_section: &'a str,
-    /// Pre-rendered observer functor section, or empty string when async_style = Promise.
+    /// Pre-rendered observer functor section, or empty string when hook-only mode is selected.
     /// Inline mode only.
     pub observer_section: &'a str,
-    /// Pre-rendered React hooks section, or empty string when async_style = Observer.
+    /// Pre-rendered React hooks section, or empty string when observer-only mode is selected.
     pub react_hooks: &'a str,
     /// Pre-rendered display projection section, or empty string if unit type.
     pub display_section: &'a str,
@@ -168,16 +169,16 @@ pub(super) struct ReducerFileRes<'a> {
     /// Empty when `has_args` is false.
     pub args_record: &'a str,
     pub accessor: &'a str,
-    /// Pre-rendered React hooks section, or empty string when async_style = Observer.
+    /// Pre-rendered React hooks section, or empty string when observer-only mode is selected.
     pub react_hooks: &'a str,
-    /// Pre-rendered Make functor section, or empty string when async_style = Promise.
+    /// Pre-rendered Make functor section, or empty string when hook-only mode is selected.
     pub make_functor: &'a str,
     /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
     pub sibling_opens: &'a str,
 }
 
 /// Per-reducer server file: `Stdb__Reducers__X__Server.res`.
-/// Typed error return via try/catch: `promise<result<unit, exn>>`.
+/// Typed error return via runtime capture: `Fx.call<result<unit, Fx.error>>`.
 #[derive(Boilerplate)]
 pub(super) struct ReducerServerFileRes<'a> {
     pub header: AutoGenHeaderRes,
@@ -206,7 +207,7 @@ pub(super) struct ProcedureFileRes<'a> {
     pub ok_type: &'a str,
     /// Pre-rendered err type expression (non-empty only when `is_result`).
     pub err_type: &'a str,
-    /// Pre-rendered Make functor section, or empty string when async_style = Promise.
+    /// Pre-rendered Make functor section, or empty string when hook-only mode is selected.
     pub make_functor: &'a str,
     /// Pre-rendered `module Alias = Root__Alias` lines (replaces `open {root_module}`).
     pub sibling_opens: &'a str,
@@ -411,13 +412,30 @@ pub(super) struct StdbSchemaRes<'a> {
 }
 
 // ===========================================================================
-// Async/Observer Layer: Stdb__Async.res and functor sections
+// Call/Observer Layer: generated runtime surfaces and functor sections
 // ===========================================================================
 
-/// `Stdb__Async.res` — EFFECT_RUNTIME + OBSERVER module type contracts.
+/// `{root}__Fx.res` — observer contracts plus task helpers.
 /// Entirely static — no schema data.
 #[derive(Boilerplate)]
-pub(super) struct StdbAsyncRes;
+pub(super) struct StdbFxRes;
+
+/// `{root}__HookRuntime.res` — task helpers for hook-oriented call surfaces.
+/// Entirely static — no schema data.
+#[derive(Boilerplate)]
+pub(super) struct StdbHookRuntimeRes;
+
+/// `{root}__CallRuntime.res` — default observer runtime backed by CallSupport.
+/// Parameterized by `root_module` for the generated Fx surface.
+#[derive(Boilerplate)]
+pub(super) struct StdbCallRuntimeRes<'a> {
+    pub root_module: &'a str,
+}
+
+/// `{root}__FileBytes.res` — event-based file-to-bytes helper.
+/// Entirely static — no schema data.
+#[derive(Boilerplate)]
+pub(super) struct StdbFileBytesRes;
 
 /// `{root}__Hooks.res` — observer-backed hooks + connection framework.
 /// Provides connection context, generic `useRows`/`useCallWith`/`useCallUnit`,
@@ -426,6 +444,7 @@ pub(super) struct StdbAsyncRes;
 #[derive(Boilerplate)]
 pub(super) struct StdbHooksRes<'a> {
     pub root_module: &'a str,
+    pub fx_module: &'a str,
 }
 
 /// A single table config entry in `{root}__Bridge.res`.
@@ -449,13 +468,13 @@ pub(super) struct StdbBridgeRes<'a> {
 }
 
 /// Typed event union section for table files.
-/// Emitted unconditionally (regardless of async_style).
+/// Emitted unconditionally.
 /// Contains: type event, let subscribe
 #[derive(Boilerplate)]
 pub(super) struct TableEventSectionRes;
 
 /// Observer functor section for table files.
-/// Emitted when async_style ∈ {Observer, All}.
+/// Emitted when observer support is enabled.
 /// Contains: module MakeStream with observe + observeWithCtx
 #[derive(Boilerplate)]
 pub(super) struct TableObserverSectionRes;
@@ -466,13 +485,13 @@ pub(super) struct TableObserverSectionRes;
 
 /// `Stdb__TableFunctor.res` — TABLE module type + Make functor.
 /// Generated once as a global file when `table_style = "functor"`.
-/// Provides: type event, let subscribe, module MakeStream.
+/// Provides: type event, let subscribe, module MakeStream via the `Fx.OBSERVER` contract.
 #[derive(Boilerplate)]
 pub(super) struct TableFunctorRes {
     pub header: AutoGenHeaderRes,
     /// Pre-rendered `module Alias = Root__Alias` lines.
     pub sibling_opens: String,
-    /// Whether to emit observer MakeStream section (async_style ∈ {Observer, All}).
+    /// Whether to emit observer MakeStream section.
     pub has_observer: bool,
 }
 

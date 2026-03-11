@@ -1,4 +1,4 @@
-// Stdb__ServerConnection — module functor for server-side SpacetimeDB connections.
+// Stdb__ServerConnection — shared server-side connection slotting.
 //
 // Usage:
 //   module Config = {
@@ -9,10 +9,12 @@
 //     let connectTimeoutMs = 10000
 //   }
 //   module ServerConn = Stdb__ServerConnection.Make(Config)
-//   let conn = await ServerConn.getConnection()
+//   let connCall = ServerConn.getConnection()
 
 @@warning("-44")
 open Stdb__SdkBindings
+
+module Support = Stdb__CallSupport
 
 module type Config = {
   type rm
@@ -25,33 +27,97 @@ module type Config = {
 
 module type S = {
   type rm
-  let getConnection: unit => promise<dbConnectionImpl<rm>>
-  let getConnectionWithToken: option<string> => promise<dbConnectionImpl<rm>>
+  let getConnection: unit => Support.call<dbConnectionImpl<rm>>
+  let getConnectionWithToken: option<string> => Support.call<dbConnectionImpl<rm>>
   let resetForTests: unit => unit
 }
 
-// Coerce any error value to exn for Promise rejection.
-// SDK callbacks deliver Exn.t (JS Error instances) which are a subset of exn.
-let toExn: 'a => exn = Obj.magic
+type listener<'a> = {
+  id: int,
+  onValue: 'a => unit,
+  onError: Support.issue => unit,
+}
 
-let withTimeout = (connectionPromise, timeoutMs) =>
-  switch timeoutMs {
-  | 0 => connectionPromise
-  | ms if ms < 0 => connectionPromise
-  | ms =>
-    let timeoutPromise = Promise.make((_resolve, reject) => {
-      setTimeout(() => {
-        reject(
-          JsExn.anyToExnInternal(
-            JsError.make(`Timed out waiting for SpacetimeDB connection after ${ms->Int.toString}ms`),
-          ),
-        )
-      }, ms)->ignore
-    })
-    promiseRace([connectionPromise, timeoutPromise])
+type slot<'a> = {
+  mutable nextId: int,
+  mutable current: option<'a>,
+  mutable listeners: array<listener<'a>>,
+  mutable cancelCurrent: option<Support.cleanup>,
+}
+
+let makeSlot = (): slot<'a> => {
+  nextId: 0,
+  current: None,
+  listeners: [],
+  cancelCurrent: None,
+}
+
+let stopSlot = (slot: slot<dbConnectionImpl<'a>>) => {
+  switch slot.cancelCurrent {
+  | Some(cancel) => cancel()
+  | None => ()
+  }
+  switch slot.current {
+  | Some(conn) => conn->disconnect
+  | None => ()
+  }
+  slot.nextId = 0
+  slot.current = None
+  slot.listeners = []
+  slot.cancelCurrent = None
+}
+
+let deliverValue = (slot: slot<'a>, value) => {
+  slot.current = Some(value)
+  slot.cancelCurrent = None
+  let listeners = slot.listeners
+  slot.listeners = []
+  listeners->Array.forEach(listener => listener.onValue(value))
+}
+
+let deliverIssue = (slot: slot<'a>, issue) => {
+  slot.cancelCurrent = None
+  let listeners = slot.listeners
+  slot.listeners = []
+  listeners->Array.forEach(listener => listener.onError(issue))
+}
+
+let removeListener = (slot: slot<'a>, listenerId: int) => {
+  slot.listeners = slot.listeners->Array.filter(listener => listener.id !== listenerId)
+  switch (slot.listeners->Array.length, slot.cancelCurrent) {
+  | (0, Some(cancel)) =>
+    slot.cancelCurrent = None
+    cancel()
+  | _ => ()
+  }
+}
+
+let sharedCall = (slot: slot<'a>, start: unit => Support.call<'a>): Support.call<'a> =>
+  (~onValue, ~onError) => {
+    switch slot.current {
+    | Some(value) =>
+      onValue(value)
+      () => ()
+    | None =>
+      let listenerId = slot.nextId
+      slot.nextId = slot.nextId + 1
+      slot.listeners = Array.concat(slot.listeners, [{id: listenerId, onValue, onError}])
+
+      switch slot.cancelCurrent {
+      | Some(_) => ()
+      | None =>
+        let cancel =
+          start()->Support.observe(
+            ~onValue=value => deliverValue(slot, value),
+            ~onError=issue => deliverIssue(slot, issue),
+          )
+        slot.cancelCurrent = Some(cancel)
+      }
+
+      () => removeListener(slot, listenerId)
+    }
   }
 
-// Shared connect logic — parametric over optional token.
 let connectWithConfig = (
   ~remoteModule: Stdb__Sdk.remoteModule,
   ~uri,
@@ -59,25 +125,35 @@ let connectWithConfig = (
   ~allTableNames,
   ~token,
   ~timeoutMs,
-) => {
-  let connectPromise = Promise.make((resolve, reject) => {
+): Support.call<dbConnectionImpl<'a>> =>
+  (~onValue, ~onError) => {
     let settled = ref(false)
+    let currentConn: ref<option<dbConnectionImpl<'a>>> = ref(None)
 
-    let resolveOnce = conn =>
+    let finishWithValue = conn =>
       switch settled.contents {
       | true => ()
       | false =>
         settled := true
-        resolve(conn)
+        onValue(conn)
       }
 
-    let rejectOnce = error =>
+    let finishWithIssue = issue =>
       switch settled.contents {
       | true => ()
       | false =>
         settled := true
-        reject(toExn(error))
+        onError(issue)
       }
+
+    switch timeoutMs {
+    | ms if ms > 0 =>
+      setTimeout(
+        () => finishWithIssue(Support.TimedOut({milliseconds: ms})),
+        ms,
+      )->ignore
+    | _ => ()
+    }
 
     let builder =
       Stdb__Normalize.makeNormalizedBuilder(remoteModule, dbConfig => makeDbConnectionImpl(dbConfig))
@@ -85,44 +161,37 @@ let connectWithConfig = (
       ->withDatabaseName(databaseName)
       ->withToken(token)
       ->onConnect((conn, _identity, _authToken) => {
-        try {
-          switch allTableNames {
-          | tables if tables->Array.length > 0 =>
-            let queries = tables->Array.map(tableName => `SELECT * FROM ${tableName}`)
-            conn
-            ->subscriptionBuilder
-            ->onApplied(() => resolveOnce(conn))
-            ->onSubError((_ctx, error) => rejectOnce(error->Obj.magic))
-            ->subscribe(queries)
-            ->ignore
-          | _ => resolveOnce(conn)
-          }
-        } catch {
-        | JsExn(jsExn) => rejectOnce(jsExn->Obj.magic)
-        | exn => rejectOnce(exn->Obj.magic)
+        currentConn := Some(conn)
+        switch allTableNames {
+        | tables if tables->Array.length > 0 =>
+          let queries = tables->Array.map(tableName => `SELECT * FROM ${tableName}`)
+          conn
+          ->subscriptionBuilder
+          ->onApplied(_ctx => finishWithValue(conn))
+          ->onSubError((_ctx, issue) => finishWithIssue(issue->Support.fromCallbackIssue))
+          ->subscribe(queries)
+          ->ignore
+        | _ => finishWithValue(conn)
         }
       })
-      ->onConnectError((_ctx, error) => rejectOnce(error->Obj.magic))
+      ->onConnectError((_ctx, issue) => finishWithIssue(issue->Support.fromCallbackIssue))
 
-    try {
-      builder->build->ignore
-    } catch {
-    | JsExn(jsExn) => rejectOnce(jsExn->Obj.magic)
-    | exn => rejectOnce(exn->Obj.magic)
+    builder->build->ignore
+
+    () => {
+      settled := true
+      switch currentConn.contents {
+      | Some(conn) => conn->disconnect
+      | None => ()
+      }
     }
-  })
-
-  connectPromise->withTimeout(timeoutMs)
-}
+  }
 
 module Make = (C: Config): (S with type rm = C.rm) => {
   type rm = C.rm
 
-  // Default (tokenless) singleton connection
-  let promiseRef: ref<option<promise<dbConnectionImpl<rm>>>> = ref(None)
-
-  // Token-keyed connection pool
-  let tokenPool: Dict.t<promise<dbConnectionImpl<rm>>> = Dict.make()
+  let defaultSlot: slot<dbConnectionImpl<rm>> = makeSlot()
+  let tokenPool: ref<Dict.t<slot<dbConnectionImpl<rm>>>> = ref(Dict.make())
 
   let connectOne = (~token) =>
     connectWithConfig(
@@ -135,37 +204,29 @@ module Make = (C: Config): (S with type rm = C.rm) => {
     )
 
   let getConnection = () =>
-    switch promiseRef.contents {
-    | Some(existingPromise) => existingPromise
-    | None =>
-      let p =
-        connectOne(~token=None)->Promise.catch(error => {
-          promiseRef := None
-          throw(error)
-        })
-      promiseRef := Some(p)
-      p
-    }
+    sharedCall(defaultSlot, () => connectOne(~token=None))
 
   let getConnectionWithToken = token => {
     let key = switch token {
-    | Some(t) => t
+    | Some(value) => value
     | None => "__anonymous__"
     }
-    switch tokenPool->Dict.get(key) {
-    | Some(existing) => existing
-    | None =>
-      let p =
-        connectOne(~token)->Promise.catch(error => {
-          tokenPool->Dict.delete(key)
-          throw(error)
-        })
-      tokenPool->Dict.set(key, p)
-      p
-    }
+
+    let slot =
+      switch tokenPool.contents->Dict.get(key) {
+      | Some(existing) => existing
+      | None =>
+        let created: slot<dbConnectionImpl<rm>> = makeSlot()
+        tokenPool.contents->Dict.set(key, created)
+        created
+      }
+
+    sharedCall(slot, () => connectOne(~token))
   }
 
   let resetForTests = () => {
-    promiseRef := None
+    stopSlot(defaultSlot)
+    tokenPool.contents->Dict.valuesToArray->Array.forEach(stopSlot)
+    tokenPool := Dict.make()
   }
 }

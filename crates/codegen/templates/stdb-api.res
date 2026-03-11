@@ -7,6 +7,8 @@
 // This file is a leaf dependency: reducer/procedure modules never import it.
 // Consumer code uses `Api.reducers` / `Api.procedures` for typed access.
 
+module Fx = {{self.fx_module}}
+
 type reducers = {
 %% for f in &self.reducer_fields {
 {{f}}

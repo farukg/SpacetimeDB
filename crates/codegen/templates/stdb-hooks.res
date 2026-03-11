@@ -5,7 +5,8 @@
 //
 // Provides:
 //   - Connection context + Provider component
-//   - Generic useRows / useCallWith / useCallUnit hooks
+//   - Generic useRows hooks
+//   - Runtime-parameterized CallHooks functor for reducer/procedure calls
 //   - Plain subscription helpers (no React)
 //   - All React bindings go directly to "react", NOT through @spacetimedb/rescript/react.
 //
@@ -15,6 +16,8 @@ module Sdk = {{self.root_module}}__Sdk
 module Normalize = {{self.root_module}}__Normalize
 module Client = {{self.root_module}}__Client
 module Schema = {{self.root_module}}__Schema
+module Fx = {{self.fx_module}}
+module CallRuntime = {{self.root_module}}__CallRuntime
 
 // ── Minimal React bindings ────────────────────────────────────────────────────
 // getServerSnapshot is required for SSR — without it React throws
@@ -246,169 +249,164 @@ let useRows = (config: tableConfig<'row>): array<'row> => {
 
 // ── Reducer mutation hooks ────────────────────────────────────────────────────
 
-// Extract a human-readable message from any JS exception/error value.
-let _exnToMessage: exn => string = %raw(`
-  function(e) {
-    if (e && typeof e.message === 'string') return e.message;
-    if (typeof e === 'string') return e;
-    try { return String(e); } catch(_) { return 'Unknown reducer error'; }
-  }
-`)
-
-// Fire-and-forget: schedule microtask to call the promise error handler.
-// This is the ONLY place the SDK's promise<unit> is consumed — entirely inside
-// the infrastructure boundary, invisible to application code.
-let _fireAndForget: (promise<unit>, exn => unit) => unit = %raw(`
-  function(p, onError) { p.then(undefined, onError); }
-`)
-
 type reducerError = {
   message: string,
 }
 
-type mutationState<'args> = {
-  call: 'args => unit,
-  isPending: bool,
-  error: option<reducerError>,
-}
-
-let useCallWith = (
-  callReducer: (Sdk.connection<Sdk.remoteModule>, 'args) => promise<unit>,
-): mutationState<'args> => {
-  let conn = useConnection()
-  let (isPending, setIsPending) = useState(false)
-  let (error, setError) = useState(None)
-
-  let call = args => {
-    switch conn {
-    | Some(c) =>
-      setIsPending(_ => true)
-      setError(_ => None)
-      _fireAndForget(
-        callReducer(c, args),
-        e => {
-          setIsPending(_ => false)
-          setError(_ => Some({message: _exnToMessage(e)}))
-        },
-      )
-    | None => Console.warn("Hooks.useCallWith: no connection")
-    }
+module CallHooks = (R: Fx.CALL_RUNTIME) => {
+  type mutationState<'args> = {
+    call: 'args => unit,
+    isPending: bool,
+    error: option<reducerError>,
   }
 
-  {call, isPending, error}
-}
+  let useCallWith = (
+    callReducer: (Sdk.connection<Sdk.remoteModule>, 'args) => Fx.call<unit>,
+  ): mutationState<'args> => {
+    let conn = useConnection()
+    let (isPending, setIsPending) = useState(false)
+    let (error, setError) = useState(None)
 
-type mutationStateUnit = {
-  call: unit => unit,
-  isPending: bool,
-  error: option<reducerError>,
-}
-
-let useCallUnit = (
-  callReducer: Sdk.connection<Sdk.remoteModule> => promise<unit>,
-): mutationStateUnit => {
-  let conn = useConnection()
-  let (isPending, setIsPending) = useState(false)
-  let (error, setError) = useState(None)
-
-  let call = () => {
-    switch conn {
-    | Some(c) =>
-      setIsPending(_ => true)
-      setError(_ => None)
-      _fireAndForget(
-        callReducer(c),
-        e => {
-          setIsPending(_ => false)
-          setError(_ => Some({message: _exnToMessage(e)}))
-        },
-      )
-    | None => Console.warn("Hooks.useCallUnit: no connection")
+    let call = args => {
+      switch conn {
+      | Some(c) =>
+        setIsPending(_ => true)
+        setError(_ => None)
+        R.observe(
+          callReducer(c, args),
+          ~onValue=_ => setIsPending(_ => false),
+          ~onError=e => {
+            setIsPending(_ => false)
+            setError(_ => Some({message: R.describeError(e)}))
+          },
+        )->ignore
+      | None => Console.warn("Hooks.CallHooks.useCallWith: no connection")
+      }
     }
+
+    {call, isPending, error}
   }
 
-  {call, isPending, error}
-}
-
-// ── Procedure mutation hooks ──────────────────────────────────────────────────
-
-type procedureState<'args, 'result> = {
-  call: 'args => unit,
-  isPending: bool,
-  error: option<reducerError>,
-  data: option<'result>,
-}
-
-let useCallProcedure = (
-  callProc: (Sdk.connection<Sdk.remoteModule>, 'args) => promise<'result>,
-): procedureState<'args, 'result> => {
-  let conn = useConnection()
-  let (isPending, setIsPending) = useState(false)
-  let (error, setError) = useState(None)
-  let (data, setData) = useState(None)
-
-  let call = args => {
-    switch conn {
-    | Some(c) =>
-      setIsPending(_ => true)
-      setError(_ => None)
-      setData(_ => None)
-      _fireAndForget(
-        callProc(c, args)->Promise.then(result => {
-          setIsPending(_ => false)
-          setData(_ => Some(result))
-          Promise.resolve()
-        }),
-        e => {
-          setIsPending(_ => false)
-          setError(_ => Some({message: _exnToMessage(e)}))
-        },
-      )
-    | None => Console.warn("Hooks.useCallProcedure: no connection")
-    }
+  type mutationStateUnit = {
+    call: unit => unit,
+    isPending: bool,
+    error: option<reducerError>,
   }
 
-  {call, isPending, error, data}
-}
+  let useCallUnit = (
+    callReducer: Sdk.connection<Sdk.remoteModule> => Fx.call<unit>,
+  ): mutationStateUnit => {
+    let conn = useConnection()
+    let (isPending, setIsPending) = useState(false)
+    let (error, setError) = useState(None)
 
-type procedureStateUnit<'result> = {
-  call: unit => unit,
-  isPending: bool,
-  error: option<reducerError>,
-  data: option<'result>,
-}
-
-let useCallProcedureUnit = (
-  callProc: Sdk.connection<Sdk.remoteModule> => promise<'result>,
-): procedureStateUnit<'result> => {
-  let conn = useConnection()
-  let (isPending, setIsPending) = useState(false)
-  let (error, setError) = useState(None)
-  let (data, setData) = useState(None)
-
-  let call = () => {
-    switch conn {
-    | Some(c) =>
-      setIsPending(_ => true)
-      setError(_ => None)
-      setData(_ => None)
-      _fireAndForget(
-        callProc(c)->Promise.then(result => {
-          setIsPending(_ => false)
-          setData(_ => Some(result))
-          Promise.resolve()
-        }),
-        e => {
-          setIsPending(_ => false)
-          setError(_ => Some({message: _exnToMessage(e)}))
-        },
-      )
-    | None => Console.warn("Hooks.useCallProcedureUnit: no connection")
+    let call = () => {
+      switch conn {
+      | Some(c) =>
+        setIsPending(_ => true)
+        setError(_ => None)
+        R.observe(
+          callReducer(c),
+          ~onValue=_ => setIsPending(_ => false),
+          ~onError=e => {
+            setIsPending(_ => false)
+            setError(_ => Some({message: R.describeError(e)}))
+          },
+        )->ignore
+      | None => Console.warn("Hooks.CallHooks.useCallUnit: no connection")
+      }
     }
+
+    {call, isPending, error}
   }
 
-  {call, isPending, error, data}
+  // ── Procedure mutation hooks ────────────────────────────────────────────────
+
+  type procedureState<'args, 'result> = {
+    call: 'args => unit,
+    isPending: bool,
+    error: option<reducerError>,
+    data: option<'result>,
+  }
+
+  let useCallProcedure = (
+    callProc: (Sdk.connection<Sdk.remoteModule>, 'args) => Fx.call<'result>,
+  ): procedureState<'args, 'result> => {
+    let conn = useConnection()
+    let (isPending, setIsPending) = useState(false)
+    let (error, setError) = useState(None)
+    let (data, setData) = useState(None)
+
+    let call = args => {
+      switch conn {
+      | Some(c) =>
+        setIsPending(_ => true)
+        setError(_ => None)
+        setData(_ => None)
+        R.observe(
+          callProc(c, args),
+          ~onValue=result => {
+            setIsPending(_ => false)
+            setData(_ => Some(result))
+          },
+          ~onError=e => {
+            setIsPending(_ => false)
+            setError(_ => Some({message: R.describeError(e)}))
+          },
+        )->ignore
+      | None => Console.warn("Hooks.CallHooks.useCallProcedure: no connection")
+      }
+    }
+
+    {call, isPending, error, data}
+  }
+
+  type procedureStateUnit<'result> = {
+    call: unit => unit,
+    isPending: bool,
+    error: option<reducerError>,
+    data: option<'result>,
+  }
+
+  let useCallProcedureUnit = (
+    callProc: Sdk.connection<Sdk.remoteModule> => Fx.call<'result>,
+  ): procedureStateUnit<'result> => {
+    let conn = useConnection()
+    let (isPending, setIsPending) = useState(false)
+    let (error, setError) = useState(None)
+    let (data, setData) = useState(None)
+
+    let call = () => {
+      switch conn {
+      | Some(c) =>
+        setIsPending(_ => true)
+        setError(_ => None)
+        setData(_ => None)
+        R.observe(
+          callProc(c),
+          ~onValue=result => {
+            setIsPending(_ => false)
+            setData(_ => Some(result))
+          },
+          ~onError=e => {
+            setIsPending(_ => false)
+            setError(_ => Some({message: R.describeError(e)}))
+          },
+        )->ignore
+      | None => Console.warn("Hooks.CallHooks.useCallProcedureUnit: no connection")
+      }
+    }
+
+    {call, isPending, error, data}
+  }
 }
+
+module DefaultCallHooks = CallHooks(CallRuntime)
+
+let useCallWith = DefaultCallHooks.useCallWith
+let useCallUnit = DefaultCallHooks.useCallUnit
+let useCallProcedure = DefaultCallHooks.useCallProcedure
+let useCallProcedureUnit = DefaultCallHooks.useCallProcedureUnit
 
 // ── Table config constructor ──────────────────────────────────────────────────
 
